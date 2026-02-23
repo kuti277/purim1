@@ -40,6 +40,13 @@ export type CurrencyCode = "ILS" | "USD" | "EUR";
 /** Platform roles that determine feature access */
 export type UserRole = "admin" | "coordinator" | "volunteer" | "recipient";
 
+/**
+ * Roles that can be assigned to a worker via the dashboard or CSV upload.
+ * Excludes "admin" — admin accounts are provisioned only via the seed script,
+ * never through the self-service worker creation flow.
+ */
+export type WorkerRole = Exclude<UserRole, "admin">;
+
 /** Delivery lifecycle state for a single address */
 export type DeliveryStatus =
   | "pending"      // not yet attempted
@@ -150,6 +157,20 @@ export interface User {
   phoneNumber: string | null;
   photoUrl: string | null;
   role: UserRole;
+  /**
+   * Sequential numeric identifier, auto-assigned at account creation.
+   * Used as the caller ID in the IVR system — short enough to read aloud.
+   * Set atomically by the createWorker Cloud Function via a Firestore counter
+   * transaction. Never written directly by any client.
+   * (integer ≥ 1)
+   */
+  workerId: number;
+  /**
+   * bcrypt hash of the worker's 4-digit IVR PIN.
+   * The plaintext PIN is NEVER stored anywhere in the system.
+   * Written exclusively by createWorker / updateWorker Cloud Functions.
+   */
+  ivrPinHash: string;
   /** Group the user belongs to; null if not yet assigned */
   groupId: string | null;
   /**
@@ -477,4 +498,118 @@ export interface FeedItem {
   /** Campaign year this feed item is scoped to (integer) */
   campaignYear: number;
   createdAt: FirestoreTimestamp;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cloud Functions callable payloads — Worker CRUD
+//
+// These interfaces are the contracts between the Dashboard (caller) and the
+// Cloud Functions (callee). Both sides import from this package so the shape
+// is guaranteed to stay in sync at compile time.
+//
+// Naming convention:
+//   *Payload  → data sent TO the function
+//   *Result   → data returned FROM the function
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Input for the `createWorker` callable.
+ *
+ * The function will:
+ *  - Create a Firebase Auth account (random password, no welcome email).
+ *  - Auto-assign a sequential `workerId` via Firestore counter transaction.
+ *  - Hash `ivrPin` with bcrypt and store only the hash.
+ *  - Write the full `/users/{uid}` Firestore document.
+ *  - Set `{ role }` as a Firebase Auth custom claim.
+ */
+export interface CreateWorkerPayload {
+  email: string;
+  displayName: string;
+  /** E.164 format recommended, e.g. "+972501234567". Optional but strongly encouraged. */
+  phoneNumber?: string;
+  role: WorkerRole;
+  /**
+   * Exactly 4 decimal digits, e.g. "0847".
+   * Validated server-side; the plaintext value is discarded after hashing.
+   */
+  ivrPin: string;
+}
+
+/** Returned by `createWorker` on success. */
+export interface CreateWorkerResult {
+  /** Firebase Auth UID of the newly created account */
+  uid: string;
+  /** The auto-assigned sequential worker ID */
+  workerId: number;
+}
+
+/**
+ * Input for the `updateWorker` callable.
+ *
+ * All fields except `uid` are optional — only supplied fields are updated.
+ * Omitting `ivrPin` leaves the existing PIN hash unchanged.
+ */
+export interface UpdateWorkerPayload {
+  /** UID of the worker to update */
+  uid: string;
+  displayName?: string;
+  phoneNumber?: string;
+  role?: WorkerRole;
+  /**
+   * New 4-digit PIN. If omitted, the existing bcrypt hash is preserved.
+   * If provided, it is validated and re-hashed server-side.
+   */
+  ivrPin?: string;
+}
+
+/**
+ * Input for the `deleteWorker` callable.
+ *
+ * Performs a SOFT delete: sets `isActive: false` on the Firestore document
+ * (preserving financial audit history) and deletes the Firebase Auth account
+ * (preventing any future login or IVR authentication).
+ */
+export interface DeleteWorkerPayload {
+  /** UID of the worker to soft-delete */
+  uid: string;
+}
+
+/**
+ * Input for the `bulkCreateWorkers` callable.
+ * Maximum 200 workers per call (enforced server-side).
+ */
+export interface BulkCreateWorkersPayload {
+  workers: CreateWorkerPayload[];
+}
+
+/**
+ * Returned by `bulkCreateWorkers`.
+ * Always returned (never throws on partial failure) so the caller can
+ * display a per-row error report without losing the successful rows.
+ */
+export interface BulkCreateResult {
+  /** Number of workers successfully created */
+  created: number;
+  /** Per-row failures — row index is 0-based relative to the input array */
+  errors: Array<{
+    /** 0-based index into the input `workers` array */
+    row: number;
+    /** Human-readable failure reason (e.g. "email already in use") */
+    reason: string;
+  }>;
+}
+
+/**
+ * Shape of a single row parsed from the bulk-upload CSV file.
+ * Column names in the CSV must exactly match these field names.
+ *
+ * Required columns: displayName, email, role, ivrPin
+ * Optional columns: phoneNumber
+ */
+export interface CsvWorkerRow {
+  displayName: string;
+  email: string;
+  phoneNumber?: string;
+  role: string;   // validated as WorkerRole server-side and in the UI preview step
+  ivrPin: string; // validated as exactly 4 digits
 }
