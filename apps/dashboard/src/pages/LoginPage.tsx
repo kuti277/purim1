@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { Navigate } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth";
 
 // ─── Firebase error → human-readable message ──────────────────────────────────
@@ -28,7 +29,12 @@ function parseFirebaseError(err: unknown): string {
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export function LoginPage() {
-  const { signIn } = useAuth();
+  const { user, signIn } = useAuth();
+
+  // Already authenticated — redirect away from the login page immediately.
+  if (user) {
+    return <Navigate to="/" replace />;
+  }
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
