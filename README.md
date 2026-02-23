@@ -15,13 +15,14 @@ This project follows a **monorepo** structure, housing all applications and shar
 
 ```
 purim1/                          ← monorepo root
-├── apps/                        ← deployable applications
-│   ├── web/                     ← Next.js frontend (to be created)
-│   └── functions/               ← Firebase Cloud Functions backend (to be created)
+├── apps/                        ← deployable applications (to be created)
+│   ├── web/                     ← Next.js frontend
+│   └── functions/               ← Firebase Cloud Functions backend
 ├── packages/                    ← shared internal packages
-│   ├── ui/                      ← shared React component library (to be created)
-│   ├── config-typescript/       ← shared tsconfig bases (to be created)
-│   └── config-eslint/           ← shared ESLint configs (to be created)
+│   ├── types/                   ← @purim/types — canonical Firestore schema interfaces
+│   ├── firebase-config/         ← @purim/firebase-config — client + admin SDK init
+│   ├── utils/                   ← @purim/utils — shared utility functions
+│   └── ui/                      ← @purim/ui — shared React component library
 ├── package.json                 ← root workspace manifest
 ├── pnpm-workspace.yaml          ← pnpm workspace definition
 ├── turbo.json                   ← Turborepo pipeline configuration
@@ -107,6 +108,76 @@ To run a command scoped to a single package:
 pnpm --filter web dev
 pnpm --filter functions build
 ```
+
+---
+
+## Shared Packages (`packages/`)
+
+All packages live under `packages/` and are consumed via the `@purim/` npm scope using
+`workspace:*` references — pnpm resolves them locally with zero publish step needed.
+
+### `@purim/types`
+**Path:** `packages/types`
+
+The single source of truth for every TypeScript interface and string-literal type in the
+platform. Contains the complete Firestore data model:
+
+| Interface / Type | Description |
+|---|---|
+| `FirestoreTimestamp` | Framework-agnostic Timestamp shape (seconds + nanoseconds) |
+| `CurrencyCode` | ISO 4217 codes: `"ILS" \| "USD" \| "EUR"` |
+| `UserRole` | `admin \| coordinator \| volunteer \| recipient` |
+| `DeliveryStatus` | Address delivery lifecycle: `pending → dispatched → delivered / failed / skipped` |
+| `DispatchStatus` | Dispatch run lifecycle: `pending → in_progress → completed / cancelled` |
+| `TransactionType` | `donation \| expense \| refund \| transfer` |
+| `TransactionStatus` | `pending \| completed \| failed \| reversed` |
+| `SplitStatus` | `open \| settled \| cancelled` |
+| `CallStatus` | `answered \| missed \| voicemail \| busy \| no_answer` |
+| `AnnouncementAudience` | Target group for announcements |
+| `FeedItemType` | Discriminant tag for all activity feed events |
+| **`Address`** | Physical delivery address with geo-coordinates and delivery state |
+| **`User`** | Platform user with role, group membership, and per-campaign history |
+| **`Group`** | Volunteer group with coordinator, members list, and binder assignment |
+| **`Binder`** | Ordered collection of addresses assigned to a group for one campaign |
+| **`Dispatch`** | A volunteer's delivery run covering a subset of binder addresses |
+| **`Transaction`** | Financial record in minor currency units (agorot / cents) |
+| **`SplitParticipant`** | One participant's share within a Split |
+| **`Split`** | Cost-split record dividing a transaction among multiple participants |
+| **`Call`** | Logged phone call between two users, optionally linked to an address/dispatch |
+| **`CampaignSettings`** | Per-year global campaign configuration (dates, goals, limits) |
+| **`Announcement`** | Platform-wide announcement with audience targeting and expiry |
+| **`FeedItemPayload`** | Discriminated union of all typed event payloads |
+| **`FeedItem`** | Activity feed entry with actor, payload, and campaign context |
+
+No external dependencies — pure TypeScript.
+
+---
+
+### `@purim/firebase-config`
+**Path:** `packages/firebase-config`
+
+Initialises the Firebase client and admin SDKs in one place so every app
+(`web`, `functions`) imports a pre-configured instance rather than duplicating
+initialisation logic. Will export `db`, `auth`, and `storage` helpers for both
+browser and server environments.
+
+---
+
+### `@purim/utils`
+**Path:** `packages/utils`
+
+Pure utility functions shared across `web` and `functions`. Planned exports include
+currency formatting, Firestore timestamp helpers, date localisation, array grouping,
+and delivery-progress calculations.
+
+---
+
+### `@purim/ui`
+**Path:** `packages/ui`
+
+A headless-friendly React component library that maps directly onto the platform's
+domain (e.g. a `<StatusBadge>` that understands `DeliveryStatus`). Consumed only
+by `apps/web`.
 
 ---
 

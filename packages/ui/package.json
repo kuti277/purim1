@@ -1,0 +1,21 @@
+{
+  "name": "@purim/ui",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Shared React component library — design system primitives consumed by all frontend apps",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "lint": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  },
+  "peerDependencies": {
+    "react": ">=18.0.0",
+    "react-dom": ">=18.0.0"
+  },
+  "dependencies": {
+    "@purim/types": "workspace:*"
+  }
+}

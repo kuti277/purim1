@@ -1,0 +1,14 @@
+{
+  "name": "@purim/types",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Canonical Firestore schema interfaces and shared TypeScript types for the Purim platform",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "lint": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}
