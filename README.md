@@ -15,15 +15,25 @@ This project follows a **monorepo** structure, housing all applications and shar
 
 ```
 purim1/                          ← monorepo root
-├── apps/                        ← deployable applications
+├── apps/                        ← deployable frontend applications
 │   ├── showcase/                ← @purim/showcase — component gallery (port 5173)
 │   ├── dashboard/               ← @purim/dashboard — coordinator/volunteer UI (port 5174)
 │   └── ivr-admin/               ← @purim/ivr-admin — IVR administration panel (port 5175)
+├── functions/                   ← @purim/functions — Firebase Cloud Functions backend
+│   └── src/index.ts
 ├── packages/                    ← shared internal packages
 │   ├── types/                   ← @purim/types — canonical Firestore schema interfaces
 │   ├── firebase-config/         ← @purim/firebase-config — client + admin SDK init
 │   ├── utils/                   ← @purim/utils — shared utility functions
 │   └── ui/                      ← @purim/ui — shared React component library
+├── .github/
+│   └── workflows/
+│       ├── ci.yml               ← lint + typecheck + build on every PR
+│       └── deploy.yml           ← production deploy to Firebase on merge to main
+├── firebase.json                ← Firebase hosting, functions & emulator config
+├── firestore.rules              ← Firestore security rules (deny-all scaffold)
+├── firestore.indexes.json       ← Firestore composite index definitions
+├── storage.rules                ← Firebase Storage security rules (deny-all scaffold)
 ├── package.json                 ← root workspace manifest
 ├── pnpm-workspace.yaml          ← pnpm workspace definition
 ├── turbo.json                   ← Turborepo pipeline configuration
@@ -35,11 +45,12 @@ purim1/                          ← monorepo root
 | Layer | Technology |
 |---|---|
 | Frontend apps | Vite + React 18 + TypeScript |
-| Backend | Firebase Cloud Functions (Node.js) |
+| Backend | Firebase Cloud Functions v2 (Node 20) |
 | Database / Auth | Firebase (Firestore, Auth, Storage) |
 | Monorepo tooling | pnpm workspaces + Turborepo |
 | Language | TypeScript |
 | Styling | Tailwind CSS (to be added) |
+| CI/CD | GitHub Actions → Firebase Hosting + Functions |
 
 ---
 
@@ -226,6 +237,81 @@ and delivery-progress calculations.
 A headless-friendly React component library that maps directly onto the platform's
 domain (e.g. a `<StatusBadge>` that understands `DeliveryStatus`). Consumed only
 by `apps/web`.
+
+---
+
+## Firebase (`functions/` + root config files)
+
+### `@purim/functions`
+**Path:** `functions/`
+
+Firebase Cloud Functions v2 backend, compiled from TypeScript to CommonJS for the
+Node 20 runtime. The build output lands in `functions/lib/` (gitignored).
+
+| File | Purpose |
+|---|---|
+| `functions/src/index.ts` | Entry point — exports all callable/HTTP functions |
+| `functions/tsconfig.json` | CommonJS + Node 20 target; `outDir: lib` |
+| `firebase.json` | Hosting (3 sites), Functions source, Emulator ports |
+| `firestore.rules` | Security rules — **deny-all** until Phase 2 auth layer |
+| `firestore.indexes.json` | Composite index definitions (empty scaffold) |
+| `storage.rules` | Storage security rules — **deny-all** until Phase 2 |
+
+### Firebase Emulator Suite
+
+Run the full Firebase stack locally without touching production:
+
+```bash
+# Build functions first
+pnpm --filter @purim/functions build
+
+# Then start all emulators
+firebase emulators:start
+```
+
+| Emulator | Port | URL |
+|---|---|---|
+| Emulator UI | 4000 | http://localhost:4000 |
+| Auth | 9099 | — |
+| Firestore | 8080 | — |
+| Functions | 5001 | — |
+| Hosting | 5000 | http://localhost:5000 |
+| Storage | 9199 | — |
+
+### Firebase Hosting targets
+
+Each app maps to a named hosting target defined in `firebase.json`. When deployed,
+all SPAs use a `**` → `/index.html` rewrite so client-side routing works correctly.
+
+| Target | Dist folder | Site |
+|---|---|---|
+| `showcase` | `apps/showcase/dist` | showcase.\<project\>.web.app |
+| `dashboard` | `apps/dashboard/dist` | dashboard.\<project\>.web.app |
+| `ivr-admin` | `apps/ivr-admin/dist` | ivr-admin.\<project\>.web.app |
+
+---
+
+## CI/CD (`.github/workflows/`)
+
+### `ci.yml` — runs on every push and pull request to `main` / `develop`
+
+1. **Lint & Typecheck** — `pnpm lint` across all workspaces via Turborepo.
+2. **Build** — `pnpm build`; uploads compiled artifacts for inspection.
+
+### `deploy.yml` — runs on merge to `main` (or manual trigger)
+
+1. **Build** — full production build.
+2. **Deploy Hosting** — pushes all three `dist/` folders to Firebase Hosting
+   (activate by adding `FIREBASE_SERVICE_ACCOUNT` + `FIREBASE_PROJECT_ID` secrets).
+3. **Deploy Functions** — runs `firebase deploy --only functions`
+   (same secrets required).
+
+**Required GitHub Secrets** (set in repo → Settings → Secrets → Actions):
+
+| Secret | Description |
+|---|---|
+| `FIREBASE_SERVICE_ACCOUNT` | JSON key of a Firebase service account with deploy rights |
+| `FIREBASE_PROJECT_ID` | The Firebase project ID (e.g. `purim1-prod`) |
 
 ---
 
