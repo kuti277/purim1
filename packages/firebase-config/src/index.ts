@@ -1,5 +1,18 @@
-// TODO: implement — Firebase app initialization (client + admin SDKs)
-// This package will export:
-//   - clientApp: FirebaseApp (initialized with public env vars for the browser)
-//   - adminApp: App (initialized with service account credentials for Cloud Functions)
-//   - db, auth, storage helpers for both environments
+/**
+ * @purim/firebase-config
+ *
+ * Client-side Firebase SDK initialization for all browser apps in the monorepo.
+ *
+ * ⚠️  This package is BROWSER-ONLY.
+ *     It must NEVER be imported in firebase-functions or any Node.js context.
+ *     The Admin SDK (firebase-admin) lives exclusively inside functions/.
+ *
+ * Usage:
+ *   import { clientAuth, clientDb } from "@purim/firebase-config";
+ */
+export {
+  clientApp,
+  clientAuth,
+  clientDb,
+  clientStorage,
+} from "./client";
