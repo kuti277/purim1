@@ -1,0 +1,28 @@
+{
+  "name": "@purim/ivr-admin",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "IVR administration panel — manage phone call flows, recordings, and call routing rules",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@purim/types": "workspace:*",
+    "@purim/utils": "workspace:*",
+    "@purim/ui": "workspace:*",
+    "@purim/firebase-config": "workspace:*",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.1",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.1",
+    "typescript": "^5.5.3",
+    "vite": "^5.4.1"
+  }
+}

@@ -15,9 +15,10 @@ This project follows a **monorepo** structure, housing all applications and shar
 
 ```
 purim1/                          ← monorepo root
-├── apps/                        ← deployable applications (to be created)
-│   ├── web/                     ← Next.js frontend
-│   └── functions/               ← Firebase Cloud Functions backend
+├── apps/                        ← deployable applications
+│   ├── showcase/                ← @purim/showcase — component gallery (port 5173)
+│   ├── dashboard/               ← @purim/dashboard — coordinator/volunteer UI (port 5174)
+│   └── ivr-admin/               ← @purim/ivr-admin — IVR administration panel (port 5175)
 ├── packages/                    ← shared internal packages
 │   ├── types/                   ← @purim/types — canonical Firestore schema interfaces
 │   ├── firebase-config/         ← @purim/firebase-config — client + admin SDK init
@@ -33,12 +34,12 @@ purim1/                          ← monorepo root
 
 | Layer | Technology |
 |---|---|
-| Frontend | Next.js 14 (App Router) |
+| Frontend apps | Vite + React 18 + TypeScript |
 | Backend | Firebase Cloud Functions (Node.js) |
 | Database / Auth | Firebase (Firestore, Auth, Storage) |
 | Monorepo tooling | pnpm workspaces + Turborepo |
 | Language | TypeScript |
-| Styling | Tailwind CSS |
+| Styling | Tailwind CSS (to be added) |
 
 ---
 
@@ -75,11 +76,12 @@ This installs all dependencies for every workspace package in one shot.
 
 ### 3. Configure environment variables
 
-Each app has its own `.env.local` file (never committed). Copy the example files:
+Each app has its own `.env.local` file (never committed). Copy the example files once they
+are created:
 
 ```bash
-# (Once app directories exist)
-cp apps/web/.env.example apps/web/.env.local
+cp apps/dashboard/.env.example apps/dashboard/.env.local
+cp apps/ivr-admin/.env.example apps/ivr-admin/.env.local
 ```
 
 ### 4. Run the development servers
@@ -88,7 +90,13 @@ cp apps/web/.env.example apps/web/.env.local
 pnpm dev
 ```
 
-Turborepo will start all `dev` tasks across `apps/*` in parallel.
+Turborepo starts all `dev` tasks across `apps/*` in parallel. Each app runs on its own port:
+
+| App | URL |
+|---|---|
+| `showcase` | http://localhost:5173 |
+| `dashboard` | http://localhost:5174 |
+| `ivr-admin` | http://localhost:5175 |
 
 ---
 
@@ -102,12 +110,52 @@ Turborepo will start all `dev` tasks across `apps/*` in parallel.
 | `pnpm clean` | Remove all build artifacts and `node_modules` |
 | `pnpm format` | Auto-format all files with Prettier |
 
-To run a command scoped to a single package:
+To run a command scoped to a single app or package:
 
 ```bash
-pnpm --filter web dev
-pnpm --filter functions build
+pnpm --filter showcase dev
+pnpm --filter dashboard dev
+pnpm --filter ivr-admin dev
+pnpm --filter @purim/types lint
 ```
+
+---
+
+## Applications (`apps/`)
+
+All three apps are **Vite + React 18 + TypeScript** single-page applications. They share
+internal packages via `workspace:*` references and run on dedicated ports to avoid
+conflicts during concurrent development.
+
+### `@purim/showcase`
+**Path:** `apps/showcase` | **Port:** 5173
+
+An interactive component gallery for the `@purim/ui` design system. Used during
+development to render and test UI primitives in isolation — similar to Storybook but
+lighter weight. Has no Firebase dependency.
+
+**Workspace dependencies:** `@purim/types`, `@purim/utils`, `@purim/ui`
+
+---
+
+### `@purim/dashboard`
+**Path:** `apps/dashboard` | **Port:** 5174
+
+The main operational interface used by coordinators and volunteers during the campaign.
+Features will include: binder management, dispatch tracking, volunteer assignment,
+delivery progress maps, and the activity feed.
+
+**Workspace dependencies:** `@purim/types`, `@purim/utils`, `@purim/ui`, `@purim/firebase-config`
+
+---
+
+### `@purim/ivr-admin`
+**Path:** `apps/ivr-admin` | **Port:** 5175
+
+Administration panel for the IVR (Interactive Voice Response) phone system. Used by
+admins to configure call flows, review call logs, manage recordings, and set routing rules.
+
+**Workspace dependencies:** `@purim/types`, `@purim/utils`, `@purim/ui`, `@purim/firebase-config`
 
 ---
 
