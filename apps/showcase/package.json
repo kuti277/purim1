@@ -11,9 +11,11 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
+    "@purim/firebase-config": "workspace:*",
     "@purim/types": "workspace:*",
     "@purim/utils": "workspace:*",
     "@purim/ui": "workspace:*",
+    "firebase": "^10",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
@@ -21,6 +23,9 @@
     "@types/react": "^18.3.1",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.1",
+    "autoprefixer": "^10",
+    "postcss": "^8",
+    "tailwindcss": "^3",
     "typescript": "^5.5.3",
     "vite": "^5.4.1"
   }

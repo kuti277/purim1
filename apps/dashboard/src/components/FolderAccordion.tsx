@@ -14,6 +14,8 @@ export interface Boy {
   shiur: string;
   status: "in_field" | "finished" | "not_out";
   folderId: string;
+  /** Fundraising target in NIS. */
+  goal: number;
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────

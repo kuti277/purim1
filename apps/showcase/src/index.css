@@ -1,0 +1,18 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Artifont — top-collector special font.
+ *
+ * Uncomment and fill in the real src URL once you have the font file:
+ *
+ * @font-face {
+ *   font-family: "Artifont";
+ *   src: url("/fonts/artifont.woff2") format("woff2"),
+ *        url("/fonts/artifont.woff")  format("woff");
+ *   font-weight: normal;
+ *   font-style:  normal;
+ *   font-display: swap;
+ * }
+ */

@@ -40,10 +40,17 @@ const ADMIN_DISPLAY_NAME = "Admin Admin";
 
 const FOLDER_ID = "folder-001";
 
+// goal and totalRaised are in NIS (shekels).
+// The four boys are deliberately spread across all four leaderboard colour zones:
+//   ישראל ישראלי  50/500  = 10% → Red
+//   משה כהן      200/500  = 40% → Yellow
+//   דוד לוי      300/500  = 60% → Orange
+//   יעקב פרידמן  480/500  = 96% → Green
 const BOYS = [
-  { name: "ישראל ישראלי", shiur: "א" },
-  { name: "משה כהן",      shiur: "ב" },
-  { name: "דוד לוי",      shiur: "ג" },
+  { name: "ישראל ישראלי", shiur: "א", totalRaised:  50, goal: 500 },
+  { name: "משה כהן",      shiur: "ב", totalRaised: 200, goal: 500 },
+  { name: "דוד לוי",      shiur: "ג", totalRaised: 300, goal: 500 },
+  { name: "יעקב פרידמן",  shiur: "ד", totalRaised: 480, goal: 500 },
 ];
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -103,10 +110,11 @@ async function seed() {
       name:        boy.name,
       shiur:       boy.shiur,
       status:      "in_field",
-      totalRaised: 0,
+      totalRaised: boy.totalRaised,
+      goal:        boy.goal,
       folderId:    FOLDER_ID,
     });
-    console.log(`  ✓  boys/${ref.id}  { name: '${boy.name}', shiur: '${boy.shiur}', totalRaised: 0 }`);
+    console.log(`  ✓  boys/${ref.id}  { name: '${boy.name}', shiur: '${boy.shiur}', totalRaised: ${boy.totalRaised}, goal: ${boy.goal} }`);
   }
 
   // ── Summary ────────────────────────────────────────────────────────────────
@@ -115,11 +123,17 @@ async function seed() {
   console.log("   Login credentials:");
   console.log(`     Email:    ${ADMIN_EMAIL}`);
   console.log(`     Password: ${ADMIN_PASSWORD}\n`);
-  console.log("   Expected split for a 100 ₪ folder donation (3 boys):");
-  console.log("     boys[0] → 33.34 ₪   (receives the 1-agora remainder)");
-  console.log("     boys[1] → 33.33 ₪");
-  console.log("     boys[2] → 33.33 ₪");
+  console.log("   Expected split for a 100 ₪ folder donation (4 boys):");
+  console.log("     boys[0] → 25.00 ₪");
+  console.log("     boys[1] → 25.00 ₪");
+  console.log("     boys[2] → 25.00 ₪");
+  console.log("     boys[3] → 25.00 ₪");
   console.log("     total   = 100.00 ₪  ✓\n");
+  console.log("   Leaderboard colour zones (totalRaised / goal):");
+  console.log("     ישראל ישראלי   50/500 = 10% → Red");
+  console.log("     משה כהן       200/500 = 40% → Yellow");
+  console.log("     דוד לוי       300/500 = 60% → Orange");
+  console.log("     יעקב פרידמן   480/500 = 96% → Green\n");
   console.log("   Emulator UI → http://localhost:4000\n");
 
   process.exit(0);
