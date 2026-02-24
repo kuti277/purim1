@@ -1,8 +1,39 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /{document=**} {
-      allow read, write: if true;
+
+    // ── users ──────────────────────────────────────────────────────────────────
+    // Each authenticated user may only read their own profile document.
+    // All writes go through the Admin SDK (Cloud Functions / seed script) and
+    // are not subject to these rules.
+    match /users/{userId} {
+      allow read: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // ── folders + boys ─────────────────────────────────────────────────────────
+    // Any authenticated coordinator may read folders and boys (needed for
+    // FoldersPage accordions and the TransactionsPage target picker).
+    match /folders/{folderId} {
+      allow read: if request.auth != null;
+    }
+
+    match /boys/{boyId} {
+      allow read: if request.auth != null;
+    }
+
+    // ── pending_transactions ────────────────────────────────────────────────────
+    // Coordinators create intent documents; the Cloud Function deletes them.
+    // No client reads needed — the client only writes here.
+    match /pending_transactions/{docId} {
+      allow create: if request.auth != null;
+    }
+
+    // ── transactions ────────────────────────────────────────────────────────────
+    // Coordinators may read the history and request a cancellation (update).
+    // Create and delete are Cloud Function–only (Admin SDK bypasses rules).
+    match /transactions/{txId} {
+      allow read:   if request.auth != null;
+      allow update: if request.auth != null;
     }
   }
 }
