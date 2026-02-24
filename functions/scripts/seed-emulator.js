@@ -36,7 +36,7 @@ const db   = getFirestore();
 
 const ADMIN_EMAIL        = "admin@example.com";
 const ADMIN_PASSWORD     = "123456";
-const ADMIN_DISPLAY_NAME = "Admin";
+const ADMIN_DISPLAY_NAME = "Admin Admin";
 
 const FOLDER_ID = "folder-001";
 
