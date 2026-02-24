@@ -364,12 +364,44 @@ Firebase Cloud Functions v2 backend, compiled from TypeScript to CommonJS for th
 
 | File | Purpose |
 |---|---|
-| `functions/src/index.ts` | Entry point — exports all callable/HTTP functions |
+| `functions/src/index.ts` | Entry point — exports all functions |
+| `functions/src/lib/admin.ts` | Admin SDK singleton — `initializeApp()` guard + exports `db` |
+| `functions/src/financial/processTransactions.ts` | Donation processing and cancellation triggers |
 | `functions/tsconfig.json` | CommonJS + Node 20 target; `outDir: lib` |
 | `firebase.json` | Hosting (3 sites), Functions source, Emulator ports |
 | `firestore.rules` | Security rules — **deny-all** scaffold |
 | `firestore.indexes.json` | Composite index definitions (empty scaffold) |
 | `storage.rules` | Storage security rules — **deny-all** scaffold |
+
+### Cloud Function Triggers
+
+#### `processPendingTransaction`
+**Trigger:** `onDocumentCreated("pending_transactions/{docId}")`
+
+Fires when the client-side donation form writes a document to `pending_transactions`. The function:
+
+1. Reads the pending document (`amount`, `type`, `targetId`, `targetType`, `targetName`, `dedication`, `date`).
+2. **Resolves the split:**
+   - `targetType === 'folder'` — queries `boys` where `folderId == targetId` and `status == 'in_field'`. If the folder has no active boys the pending document is updated to `status: 'failed'` and the function exits. Otherwise the amount is split evenly using agora-level integer arithmetic (multiply by 100 → divide → remainder to first boy → divide by 100), guaranteeing the sum of all shares equals the original amount exactly.
+   - `targetType === 'boy'` — single-entry split: full amount to that one boy.
+3. **Commits an atomic `db.batch()`:**
+   - `batch.set` — creates the confirmed document in `transactions` with `status: 'completed'` and the full `splitDetails` array.
+   - `batch.update` (×N) — increments each affected boy's `totalRaised` by their exact share using `FieldValue.increment`.
+   - `batch.delete` — removes the processed `pending_transactions` document.
+
+The confirmed transaction document reuses the pending document's ID, making the entire operation **idempotent** on retry.
+
+#### `processTransactionCancellation`
+**Trigger:** `onDocumentUpdated("transactions/{txId}")`
+
+Fires on any update to a `transactions` document. Only acts when `before.status === 'completed'` and `after.status === 'request_cancel'` — the signal set by the client when a coordinator clicks "ביטול עסקה".
+
+1. Reads `splitDetails` from the updated document.
+2. **Commits an atomic `db.batch()`:**
+   - `batch.update` (×N) — decrements each boy's `totalRaised` by the exact amount stored in `splitDetails` (not recalculated — uses stored values so reversals are always mathematically identical to the original split).
+   - `batch.update` — flips `status` to `'cancelled'`.
+
+All financial logic (split math, `totalRaised` updates) runs exclusively in these Cloud Functions. The client writes only intent documents (`pending_transactions`) and status signals (`request_cancel`) — it never performs arithmetic or touches `boys` documents directly.
 
 ### Firebase Emulator Suite
 

@@ -1,25 +1,18 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import {
+  addDoc,
   collection,
   doc,
-  getDocs,
-  increment,
   onSnapshot,
   orderBy,
   query,
   serverTimestamp,
   Timestamp,
-  where,
-  writeBatch,
+  updateDoc,
 } from "firebase/firestore";
 import { clientDb } from "../lib/firebase";
 
 // ─── Local types ──────────────────────────────────────────────────────────────
-
-interface SplitDetail {
-  boyId: string;
-  amount: number; // NIS
-}
 
 interface TxDoc {
   id: string;
@@ -30,8 +23,8 @@ interface TxDoc {
   targetName: string;
   dedication: string;
   date: Timestamp | null;
-  status: "completed" | "cancelled";
-  splitDetails: SplitDetail[];
+  // completed → normal; request_cancel → awaiting backend reversal; cancelled → fully reversed
+  status: "completed" | "request_cancel" | "cancelled";
 }
 
 interface BoyDoc {
@@ -68,21 +61,6 @@ function formatDate(ts: Timestamp | null): string {
     hour: "2-digit",
     minute: "2-digit",
   });
-}
-
-/**
- * Split `total` NIS across `count` recipients using integer (agora-level) math
- * so the sum is always exact. The first recipient absorbs the remainder.
- */
-function splitEvenly(total: number, count: number): number[] {
-  if (count === 0) return [];
-  // Work in agorot to avoid floating-point drift
-  const totalAg = Math.round(total * 100);
-  const perAg = Math.floor(totalAg / count);
-  const remainderAg = totalAg - perAg * count;
-  return Array.from({ length: count }, (_, i) =>
-    Math.round(((i === 0 ? perAg + remainderAg : perAg) / 100) * 100) / 100
-  );
 }
 
 // ─── Shared field styles ──────────────────────────────────────────────────────
@@ -259,63 +237,26 @@ function DonationForm({ boys, folders, onSaved }: DonationFormProps) {
         string,
       ];
 
-      let targetName: string;
-      let splitDetails: SplitDetail[];
+      // Resolve display name from in-memory state — no extra Firestore query needed.
+      // The Cloud Function will independently verify the target and perform the split.
+      const targetName =
+        targetType === "folder"
+          ? `קלסר ${targetId}`
+          : (boys.find((b) => b.id === targetId)?.name ?? targetId);
 
-      if (targetType === "folder") {
-        // ── Folder target: split equally among boys currently in the field ──────
-        targetName = `קלסר ${targetId}`;
-
-        const boysSnap = await getDocs(
-          query(
-            collection(clientDb, "boys"),
-            where("folderId", "==", targetId),
-            where("status", "==", "in_field")
-          )
-        );
-
-        if (boysSnap.empty) {
-          setError("אין ילדים פעילים בשטח בקלסר זה");
-          setSubmitting(false);
-          return;
-        }
-
-        const activeBoys = boysSnap.docs.map((d) => d.id);
-        const shares = splitEvenly(parsedAmount, activeBoys.length);
-        splitDetails = activeBoys.map((boyId, i) => ({
-          boyId,
-          amount: shares[i],
-        }));
-      } else {
-        // ── Single boy target ────────────────────────────────────────────────────
-        const boy = boys.find((b) => b.id === targetId);
-        targetName = boy?.name ?? targetId;
-        splitDetails = [{ boyId: targetId, amount: parsedAmount }];
-      }
-
-      // ── Atomic batch: write transaction + increment each boy's totalRaised ────
-      const batch = writeBatch(clientDb);
-
-      const txRef = doc(collection(clientDb, "transactions"));
-      batch.set(txRef, {
-        type: paymentType,
+      // Write a single pending_transactions document.
+      // The Cloud Function picks this up, performs the split, updates boys' totalRaised,
+      // and writes the final record to the transactions collection.
+      await addDoc(collection(clientDb, "pending_transactions"), {
         amount: parsedAmount,
+        type: paymentType,
         targetId,
         targetType,
         targetName,
         dedication: dedication.trim(),
         date: serverTimestamp(),
-        status: "completed",
-        splitDetails,
+        status: "pending",
       });
-
-      for (const split of splitDetails) {
-        batch.update(doc(clientDb, "boys", split.boyId), {
-          totalRaised: increment(split.amount),
-        });
-      }
-
-      await batch.commit();
 
       // Reset form
       setAmount("");
@@ -464,6 +405,34 @@ interface HistoryTableProps {
   onCancel: (tx: TxDoc) => Promise<void>;
 }
 
+function StatusBadge({ status }: { status: TxDoc["status"] }) {
+  if (status === "completed") {
+    return (
+      <span className="inline-flex items-center rounded-full bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700 ring-1 ring-inset ring-green-600/20">
+        הושלם
+      </span>
+    );
+  }
+  if (status === "request_cancel") {
+    return (
+      <span className="inline-flex items-center rounded-full bg-yellow-50 px-2 py-0.5 text-xs font-medium text-yellow-700 ring-1 ring-inset ring-yellow-600/20">
+        ממתין לביטול
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700 ring-1 ring-inset ring-red-600/20">
+      בוטל
+    </span>
+  );
+}
+
+function rowClass(status: TxDoc["status"]) {
+  if (status === "cancelled") return "bg-gray-50 opacity-60";
+  if (status === "request_cancel") return "bg-yellow-50/40";
+  return "bg-white hover:bg-gray-50/50";
+}
+
 function TransactionHistoryTable({
   transactions,
   cancellingId,
@@ -488,7 +457,7 @@ function TransactionHistoryTable({
         </svg>
         <p className="mt-3 text-sm font-medium text-gray-500">אין עסקאות עדיין</p>
         <p className="mt-1 text-xs text-gray-400">
-          תרומות שיוזנו יופיעו כאן בסדר כרונולוגי הפוך
+          תרומות שיאושרו על ידי השרת יופיעו כאן בסדר כרונולוגי הפוך
         </p>
       </div>
     );
@@ -521,14 +490,7 @@ function TransactionHistoryTable({
 
           <tbody className="divide-y divide-gray-100">
             {transactions.map((tx) => (
-              <tr
-                key={tx.id}
-                className={
-                  tx.status === "cancelled"
-                    ? "bg-gray-50 opacity-60"
-                    : "bg-white hover:bg-gray-50/50"
-                }
-              >
+              <tr key={tx.id} className={rowClass(tx.status)}>
                 {/* Date */}
                 <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-600">
                   {formatDate(tx.date)}
@@ -561,18 +523,10 @@ function TransactionHistoryTable({
 
                 {/* Status badge */}
                 <td className="px-4 py-3">
-                  {tx.status === "completed" ? (
-                    <span className="inline-flex items-center rounded-full bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700 ring-1 ring-inset ring-green-600/20">
-                      הושלם
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700 ring-1 ring-inset ring-red-600/20">
-                      בוטל
-                    </span>
-                  )}
+                  <StatusBadge status={tx.status} />
                 </td>
 
-                {/* Cancel action */}
+                {/* Cancel action — only available on completed transactions */}
                 <td className="px-4 py-3">
                   {tx.status === "completed" && (
                     <button
@@ -587,7 +541,7 @@ function TransactionHistoryTable({
                         focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-1
                       "
                     >
-                      {cancellingId === tx.id ? "מבטל..." : "ביטול עסקה"}
+                      {cancellingId === tx.id ? "שולח..." : "ביטול עסקה"}
                     </button>
                   )}
                 </td>
@@ -625,7 +579,7 @@ export function TransactionsPage() {
     };
   }, []);
 
-  // ── Firestore: transactions (newest first) ──────────────────────────────────
+  // ── Firestore: confirmed transactions (newest first) ────────────────────────
   useEffect(() => {
     const unsub = onSnapshot(
       query(collection(clientDb, "transactions"), orderBy("date", "desc")),
@@ -646,7 +600,7 @@ export function TransactionsPage() {
     return unsub;
   }, []);
 
-  // ── Firestore: boys ─────────────────────────────────────────────────────────
+  // ── Firestore: boys (for target dropdown) ───────────────────────────────────
   useEffect(() => {
     const unsub = onSnapshot(
       collection(clientDb, "boys"),
@@ -663,7 +617,7 @@ export function TransactionsPage() {
     return unsub;
   }, []);
 
-  // ── Firestore: folders ──────────────────────────────────────────────────────
+  // ── Firestore: folders (for target dropdown) ────────────────────────────────
   useEffect(() => {
     const unsub = onSnapshot(
       collection(clientDb, "folders"),
@@ -681,26 +635,16 @@ export function TransactionsPage() {
   }, []);
 
   // ── Cancel handler ──────────────────────────────────────────────────────────
+  // Sets status to 'request_cancel'. The Cloud Function detects this change,
+  // performs the reversal math, updates boys' totalRaised, and flips the
+  // status to 'cancelled'.
   async function handleCancel(tx: TxDoc) {
     setCancellingId(tx.id);
     try {
-      const batch = writeBatch(clientDb);
-
-      // Mark the transaction as cancelled
-      batch.update(doc(clientDb, "transactions", tx.id), {
-        status: "cancelled",
+      await updateDoc(doc(clientDb, "transactions", tx.id), {
+        status: "request_cancel",
       });
-
-      // Reverse the exact split amounts — uses stored splitDetails for precision,
-      // regardless of any boy status changes that occurred since the donation.
-      for (const split of tx.splitDetails ?? []) {
-        batch.update(doc(clientDb, "boys", split.boyId), {
-          totalRaised: increment(-split.amount),
-        });
-      }
-
-      await batch.commit();
-      showSuccess("העסקה בוטלה בהצלחה — הסכומים הופחתו מהילדים הרלוונטיים");
+      showSuccess("בקשת הביטול נשלחה — השרת יעבד את ההיפוך בקרוב");
     } catch (err) {
       console.error("[TransactionsPage] cancel error:", err);
     } finally {
@@ -730,7 +674,7 @@ export function TransactionsPage() {
       <DonationForm
         boys={boys}
         folders={folders}
-        onSaved={() => showSuccess("התרומה נשמרה בהצלחה")}
+        onSaved={() => showSuccess("התרומה התקבלה לעיבוד — תופיע בטבלה לאחר אישור השרת")}
       />
 
       {/* Transaction history */}

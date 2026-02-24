@@ -33,14 +33,17 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.healthCheck = void 0;
+exports.healthCheck = exports.processTransactionCancellation = exports.processPendingTransaction = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const logger = __importStar(require("firebase-functions/logger"));
+// ─── Financial triggers ───────────────────────────────────────────────────────
+var processTransactions_1 = require("./financial/processTransactions");
+Object.defineProperty(exports, "processPendingTransaction", { enumerable: true, get: function () { return processTransactions_1.processPendingTransaction; } });
+Object.defineProperty(exports, "processTransactionCancellation", { enumerable: true, get: function () { return processTransactions_1.processTransactionCancellation; } });
+// ─── Utility endpoints ────────────────────────────────────────────────────────
 /**
  * Health-check endpoint — confirms the Functions runtime is alive.
  * GET /healthCheck → { status: "ok", timestamp: "<ISO string>" }
- *
- * TODO: replace with actual business-logic functions in Phase 2.
  */
 exports.healthCheck = (0, https_1.onRequest)((req, res) => {
     logger.info("healthCheck called", { method: req.method });
