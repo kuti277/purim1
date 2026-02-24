@@ -78,10 +78,31 @@ export function SipProvider({ children }: { children: ReactNode }) {
     newUa.on("unregistered", () => setIsRegistered(false));
     newUa.on("registrationFailed", () => setIsRegistered(false));
 
-    // Handle incoming new call sessions (outbound sessions are wired below in call())
+    // Handle incoming new call sessions
     newUa.on("newRTCSession", ({ session }: { session: any }) => {
       if (session.direction === "incoming") {
-        session.terminate();
+        // שומרים את השיחה כדי שהנציג יוכל לדבר
+        rtcSession.current = session;
+        setCalledNumber(session.remote_identity.uri.user || "לא חסוי");
+        setCalledLabel("שיחה נכנסת משטח...");
+        setActiveCallStatus("ringing");
+        setIsMuted(false);
+
+        // מושכים את האודיו של הבחור לרמקולים של הנציג
+        session.on("peerconnection", ({ peerconnection }: { peerconnection: RTCPeerConnection }) => {
+          peerconnection.addEventListener("track", (evt: RTCTrackEvent) => {
+            if (audioRef.current && evt.streams[0]) {
+              audioRef.current.srcObject = evt.streams[0];
+            }
+          });
+        });
+
+        session.on("confirmed", () => setActiveCallStatus("active"));
+        session.on("ended", () => resetCallState());
+        session.on("failed", () => resetCallState());
+
+        // מענה אוטומטי לשיחה הנכנסת
+        session.answer({ mediaConstraints: { audio: true, video: false } });
       }
     });
 

@@ -1,0 +1,755 @@
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import {
+  collection,
+  doc,
+  getDocs,
+  increment,
+  onSnapshot,
+  orderBy,
+  query,
+  serverTimestamp,
+  Timestamp,
+  where,
+  writeBatch,
+} from "firebase/firestore";
+import { clientDb } from "../lib/firebase";
+
+// ─── Local types ──────────────────────────────────────────────────────────────
+
+interface SplitDetail {
+  boyId: string;
+  amount: number; // NIS
+}
+
+interface TxDoc {
+  id: string;
+  type: "credit" | "cash";
+  amount: number;
+  targetId: string;
+  targetType: "folder" | "boy";
+  targetName: string;
+  dedication: string;
+  date: Timestamp | null;
+  status: "completed" | "cancelled";
+  splitDetails: SplitDetail[];
+}
+
+interface BoyDoc {
+  id: string;
+  name: string;
+  status: string;
+  folderId: string;
+  totalRaised: number;
+}
+
+interface FolderDoc {
+  id: string;
+  status: "new" | "released" | "finished";
+  phoneNumber: string;
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function formatCurrency(amount: number): string {
+  return new Intl.NumberFormat("he-IL", {
+    style: "currency",
+    currency: "ILS",
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  }).format(amount);
+}
+
+function formatDate(ts: Timestamp | null): string {
+  if (!ts) return "—";
+  return ts.toDate().toLocaleString("he-IL", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+/**
+ * Split `total` NIS across `count` recipients using integer (agora-level) math
+ * so the sum is always exact. The first recipient absorbs the remainder.
+ */
+function splitEvenly(total: number, count: number): number[] {
+  if (count === 0) return [];
+  // Work in agorot to avoid floating-point drift
+  const totalAg = Math.round(total * 100);
+  const perAg = Math.floor(totalAg / count);
+  const remainderAg = totalAg - perAg * count;
+  return Array.from({ length: count }, (_, i) =>
+    Math.round(((i === 0 ? perAg + remainderAg : perAg) / 100) * 100) / 100
+  );
+}
+
+// ─── Shared field styles ──────────────────────────────────────────────────────
+
+const fieldCls =
+  "rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-800 " +
+  "placeholder-gray-400 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 " +
+  "bg-white";
+
+const labelCls = "text-xs font-medium text-gray-600";
+
+// ─── Credit card section ──────────────────────────────────────────────────────
+
+interface CreditFields {
+  cardNumber: string;
+  expiry: string;
+  cvv: string;
+  idNumber: string;
+  cardholderName: string;
+}
+
+const EMPTY_CREDIT: CreditFields = {
+  cardNumber: "",
+  expiry: "",
+  cvv: "",
+  idNumber: "",
+  cardholderName: "",
+};
+
+function CreditCardSection({
+  value,
+  onChange,
+}: {
+  value: CreditFields;
+  onChange: (f: CreditFields) => void;
+}) {
+  function set(key: keyof CreditFields) {
+    return (e: React.ChangeEvent<HTMLInputElement>) =>
+      onChange({ ...value, [key]: e.target.value });
+  }
+
+  return (
+    <div className="mt-4 rounded-xl border border-indigo-100 bg-indigo-50 p-4">
+      <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-indigo-700">
+        פרטי כרטיס אשראי
+      </p>
+      <div className="grid grid-cols-2 gap-3">
+        {/* Card number — full width */}
+        <div className="col-span-2 flex flex-col gap-1">
+          <label htmlFor="cc-number" className={labelCls}>
+            מספר כרטיס
+          </label>
+          <input
+            id="cc-number"
+            type="text"
+            dir="ltr"
+            placeholder="1234 5678 9012 3456"
+            maxLength={19}
+            value={value.cardNumber}
+            onChange={set("cardNumber")}
+            className={fieldCls}
+          />
+        </div>
+
+        {/* Expiry */}
+        <div className="flex flex-col gap-1">
+          <label htmlFor="cc-expiry" className={labelCls}>
+            תוקף
+          </label>
+          <input
+            id="cc-expiry"
+            type="text"
+            dir="ltr"
+            placeholder="MM/YY"
+            maxLength={5}
+            value={value.expiry}
+            onChange={set("expiry")}
+            className={fieldCls}
+          />
+        </div>
+
+        {/* CVV */}
+        <div className="flex flex-col gap-1">
+          <label htmlFor="cc-cvv" className={labelCls}>
+            CVV
+          </label>
+          <input
+            id="cc-cvv"
+            type="text"
+            dir="ltr"
+            placeholder="123"
+            maxLength={4}
+            value={value.cvv}
+            onChange={set("cvv")}
+            className={fieldCls}
+          />
+        </div>
+
+        {/* ID number */}
+        <div className="flex flex-col gap-1">
+          <label htmlFor="cc-id" className={labelCls}>
+            מספר ת"ז
+          </label>
+          <input
+            id="cc-id"
+            type="text"
+            dir="ltr"
+            placeholder="000000000"
+            maxLength={9}
+            value={value.idNumber}
+            onChange={set("idNumber")}
+            className={fieldCls}
+          />
+        </div>
+
+        {/* Cardholder name */}
+        <div className="flex flex-col gap-1">
+          <label htmlFor="cc-name" className={labelCls}>
+            שם בעל הכרטיס
+          </label>
+          <input
+            id="cc-name"
+            type="text"
+            placeholder="ישראל ישראלי"
+            value={value.cardholderName}
+            onChange={set("cardholderName")}
+            className={fieldCls}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Donation form ────────────────────────────────────────────────────────────
+
+interface DonationFormProps {
+  boys: BoyDoc[];
+  folders: FolderDoc[];
+  onSaved: () => void;
+}
+
+function DonationForm({ boys, folders, onSaved }: DonationFormProps) {
+  const [amount, setAmount] = useState("");
+  const [paymentType, setPaymentType] = useState<"cash" | "credit">("cash");
+  // Encoded as "folder:<id>" or "boy:<id>" to distinguish in one <select>
+  const [targetValue, setTargetValue] = useState("");
+  const [dedication, setDedication] = useState("");
+  const [creditFields, setCreditFields] = useState<CreditFields>(EMPTY_CREDIT);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // Only show non-finished folders in the dropdown
+  const activeFolders = folders.filter((f) => f.status !== "finished");
+
+  async function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+
+    const parsedAmount = parseFloat(amount);
+    if (isNaN(parsedAmount) || parsedAmount <= 0) {
+      setError("יש להזין סכום תקין");
+      return;
+    }
+    if (!targetValue) {
+      setError("יש לבחור יעד לתרומה");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const [targetType, targetId] = targetValue.split(":") as [
+        "folder" | "boy",
+        string,
+      ];
+
+      let targetName: string;
+      let splitDetails: SplitDetail[];
+
+      if (targetType === "folder") {
+        // ── Folder target: split equally among boys currently in the field ──────
+        targetName = `קלסר ${targetId}`;
+
+        const boysSnap = await getDocs(
+          query(
+            collection(clientDb, "boys"),
+            where("folderId", "==", targetId),
+            where("status", "==", "in_field")
+          )
+        );
+
+        if (boysSnap.empty) {
+          setError("אין ילדים פעילים בשטח בקלסר זה");
+          setSubmitting(false);
+          return;
+        }
+
+        const activeBoys = boysSnap.docs.map((d) => d.id);
+        const shares = splitEvenly(parsedAmount, activeBoys.length);
+        splitDetails = activeBoys.map((boyId, i) => ({
+          boyId,
+          amount: shares[i],
+        }));
+      } else {
+        // ── Single boy target ────────────────────────────────────────────────────
+        const boy = boys.find((b) => b.id === targetId);
+        targetName = boy?.name ?? targetId;
+        splitDetails = [{ boyId: targetId, amount: parsedAmount }];
+      }
+
+      // ── Atomic batch: write transaction + increment each boy's totalRaised ────
+      const batch = writeBatch(clientDb);
+
+      const txRef = doc(collection(clientDb, "transactions"));
+      batch.set(txRef, {
+        type: paymentType,
+        amount: parsedAmount,
+        targetId,
+        targetType,
+        targetName,
+        dedication: dedication.trim(),
+        date: serverTimestamp(),
+        status: "completed",
+        splitDetails,
+      });
+
+      for (const split of splitDetails) {
+        batch.update(doc(clientDb, "boys", split.boyId), {
+          totalRaised: increment(split.amount),
+        });
+      }
+
+      await batch.commit();
+
+      // Reset form
+      setAmount("");
+      setPaymentType("cash");
+      setTargetValue("");
+      setDedication("");
+      setCreditFields(EMPTY_CREDIT);
+      onSaved();
+    } catch (err) {
+      console.error("[DonationForm] submit error:", err);
+      setError("שגיאה בשמירת התרומה. נסה שוב.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-6">
+      <h2 className="text-base font-semibold text-gray-800 mb-5">
+        הזנת תרומה ידנית
+      </h2>
+
+      <form onSubmit={handleSubmit} noValidate>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {/* Amount */}
+          <div className="flex flex-col gap-1">
+            <label htmlFor="tx-amount" className={labelCls}>
+              סכום (₪)
+            </label>
+            <input
+              id="tx-amount"
+              type="number"
+              min="1"
+              step="1"
+              dir="ltr"
+              placeholder="0"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              className={fieldCls}
+            />
+          </div>
+
+          {/* Payment type */}
+          <div className="flex flex-col gap-1">
+            <label htmlFor="tx-type" className={labelCls}>
+              אמצעי תשלום
+            </label>
+            <select
+              id="tx-type"
+              value={paymentType}
+              onChange={(e) =>
+                setPaymentType(e.target.value as "cash" | "credit")
+              }
+              className={fieldCls}
+            >
+              <option value="cash">מזומן</option>
+              <option value="credit">אשראי</option>
+            </select>
+          </div>
+
+          {/* Target */}
+          <div className="flex flex-col gap-1">
+            <label htmlFor="tx-target" className={labelCls}>
+              יעד התרומה
+            </label>
+            <select
+              id="tx-target"
+              value={targetValue}
+              onChange={(e) => setTargetValue(e.target.value)}
+              className={fieldCls}
+            >
+              <option value="">בחר יעד...</option>
+              {activeFolders.length > 0 && (
+                <optgroup label="קלסרים">
+                  {activeFolders.map((f) => (
+                    <option key={f.id} value={`folder:${f.id}`}>
+                      קלסר {f.id}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              {boys.length > 0 && (
+                <optgroup label="ילדים">
+                  {boys.map((b) => (
+                    <option key={b.id} value={`boy:${b.id}`}>
+                      {b.name}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+            </select>
+          </div>
+
+          {/* Dedication */}
+          <div className="flex flex-col gap-1">
+            <label htmlFor="tx-dedication" className={labelCls}>
+              הקדשה / הערות
+            </label>
+            <input
+              id="tx-dedication"
+              type="text"
+              placeholder="לרפואת..."
+              value={dedication}
+              onChange={(e) => setDedication(e.target.value)}
+              className={fieldCls}
+            />
+          </div>
+        </div>
+
+        {/* Credit card fields — shown conditionally */}
+        {paymentType === "credit" && (
+          <CreditCardSection value={creditFields} onChange={setCreditFields} />
+        )}
+
+        {/* Error banner */}
+        {error && (
+          <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
+            {error}
+          </p>
+        )}
+
+        <div className="mt-5 flex justify-end">
+          <button
+            type="submit"
+            disabled={submitting}
+            className="
+              rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white
+              shadow-sm transition-colors hover:bg-indigo-500
+              disabled:cursor-not-allowed disabled:opacity-50
+              focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1
+            "
+          >
+            {submitting ? "שומר..." : "שמור תרומה"}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+// ─── Transaction history table ────────────────────────────────────────────────
+
+interface HistoryTableProps {
+  transactions: TxDoc[];
+  cancellingId: string | null;
+  onCancel: (tx: TxDoc) => Promise<void>;
+}
+
+function TransactionHistoryTable({
+  transactions,
+  cancellingId,
+  onCancel,
+}: HistoryTableProps) {
+  if (transactions.length === 0) {
+    return (
+      <div className="rounded-xl border border-dashed border-gray-300 bg-white px-6 py-16 text-center">
+        <svg
+          className="mx-auto h-10 w-10 text-gray-300"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={1.5}
+          aria-hidden="true"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25z"
+          />
+        </svg>
+        <p className="mt-3 text-sm font-medium text-gray-500">אין עסקאות עדיין</p>
+        <p className="mt-1 text-xs text-gray-400">
+          תרומות שיוזנו יופיעו כאן בסדר כרונולוגי הפוך
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+      <div className="overflow-x-auto">
+        <table className="min-w-full divide-y divide-gray-200">
+          <thead className="bg-gray-50">
+            <tr>
+              {[
+                "תאריך",
+                "יעד",
+                "סכום",
+                "אמצעי תשלום",
+                "הקדשה",
+                "סטטוס",
+                "פעולה",
+              ].map((h) => (
+                <th
+                  key={h}
+                  className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500"
+                >
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+
+          <tbody className="divide-y divide-gray-100">
+            {transactions.map((tx) => (
+              <tr
+                key={tx.id}
+                className={
+                  tx.status === "cancelled"
+                    ? "bg-gray-50 opacity-60"
+                    : "bg-white hover:bg-gray-50/50"
+                }
+              >
+                {/* Date */}
+                <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-600">
+                  {formatDate(tx.date)}
+                </td>
+
+                {/* Target */}
+                <td className="px-4 py-3 text-sm font-medium text-gray-800">
+                  {tx.targetName}
+                  {tx.targetType === "folder" && (
+                    <span className="mr-1.5 text-xs font-normal text-gray-400">
+                      (קלסר)
+                    </span>
+                  )}
+                </td>
+
+                {/* Amount */}
+                <td className="whitespace-nowrap px-4 py-3 text-sm font-semibold text-gray-800">
+                  {formatCurrency(tx.amount)}
+                </td>
+
+                {/* Type */}
+                <td className="px-4 py-3 text-sm text-gray-600">
+                  {tx.type === "credit" ? "אשראי" : "מזומן"}
+                </td>
+
+                {/* Dedication */}
+                <td className="max-w-[10rem] truncate px-4 py-3 text-sm text-gray-500">
+                  {tx.dedication || "—"}
+                </td>
+
+                {/* Status badge */}
+                <td className="px-4 py-3">
+                  {tx.status === "completed" ? (
+                    <span className="inline-flex items-center rounded-full bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700 ring-1 ring-inset ring-green-600/20">
+                      הושלם
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700 ring-1 ring-inset ring-red-600/20">
+                      בוטל
+                    </span>
+                  )}
+                </td>
+
+                {/* Cancel action */}
+                <td className="px-4 py-3">
+                  {tx.status === "completed" && (
+                    <button
+                      type="button"
+                      onClick={() => onCancel(tx)}
+                      disabled={cancellingId === tx.id}
+                      className="
+                        rounded-lg border border-red-200 bg-white px-2.5 py-1.5
+                        text-xs font-medium text-red-600
+                        hover:bg-red-50 transition-colors
+                        disabled:cursor-not-allowed disabled:opacity-50
+                        focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-1
+                      "
+                    >
+                      {cancellingId === tx.id ? "מבטל..." : "ביטול עסקה"}
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ─── Page ─────────────────────────────────────────────────────────────────────
+
+export function TransactionsPage() {
+  const [transactions, setTransactions] = useState<TxDoc[]>([]);
+  const [boys, setBoys] = useState<BoyDoc[]>([]);
+  const [folders, setFolders] = useState<FolderDoc[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
+
+  const successTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function showSuccess(msg: string) {
+    setSuccessMsg(msg);
+    if (successTimer.current) clearTimeout(successTimer.current);
+    successTimer.current = setTimeout(() => setSuccessMsg(null), 3500);
+  }
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (successTimer.current) clearTimeout(successTimer.current);
+    };
+  }, []);
+
+  // ── Firestore: transactions (newest first) ──────────────────────────────────
+  useEffect(() => {
+    const unsub = onSnapshot(
+      query(collection(clientDb, "transactions"), orderBy("date", "desc")),
+      (snap) => {
+        setTransactions(
+          snap.docs.map((d) => ({
+            id: d.id,
+            ...(d.data() as Omit<TxDoc, "id">),
+          }))
+        );
+        setLoading(false);
+      },
+      (err) => {
+        console.error("[TransactionsPage] transactions error:", err);
+        setLoading(false);
+      }
+    );
+    return unsub;
+  }, []);
+
+  // ── Firestore: boys ─────────────────────────────────────────────────────────
+  useEffect(() => {
+    const unsub = onSnapshot(
+      collection(clientDb, "boys"),
+      (snap) => {
+        setBoys(
+          snap.docs.map((d) => ({
+            id: d.id,
+            ...(d.data() as Omit<BoyDoc, "id">),
+          }))
+        );
+      },
+      (err) => console.error("[TransactionsPage] boys error:", err)
+    );
+    return unsub;
+  }, []);
+
+  // ── Firestore: folders ──────────────────────────────────────────────────────
+  useEffect(() => {
+    const unsub = onSnapshot(
+      collection(clientDb, "folders"),
+      (snap) => {
+        setFolders(
+          snap.docs.map((d) => ({
+            id: d.id,
+            ...(d.data() as Omit<FolderDoc, "id">),
+          }))
+        );
+      },
+      (err) => console.error("[TransactionsPage] folders error:", err)
+    );
+    return unsub;
+  }, []);
+
+  // ── Cancel handler ──────────────────────────────────────────────────────────
+  async function handleCancel(tx: TxDoc) {
+    setCancellingId(tx.id);
+    try {
+      const batch = writeBatch(clientDb);
+
+      // Mark the transaction as cancelled
+      batch.update(doc(clientDb, "transactions", tx.id), {
+        status: "cancelled",
+      });
+
+      // Reverse the exact split amounts — uses stored splitDetails for precision,
+      // regardless of any boy status changes that occurred since the donation.
+      for (const split of tx.splitDetails ?? []) {
+        batch.update(doc(clientDb, "boys", split.boyId), {
+          totalRaised: increment(-split.amount),
+        });
+      }
+
+      await batch.commit();
+      showSuccess("העסקה בוטלה בהצלחה — הסכומים הופחתו מהילדים הרלוונטיים");
+    } catch (err) {
+      console.error("[TransactionsPage] cancel error:", err);
+    } finally {
+      setCancellingId(null);
+    }
+  }
+
+  // ── Render ──────────────────────────────────────────────────────────────────
+  return (
+    <div className="space-y-6">
+      {/* Page heading */}
+      <div>
+        <h1 className="text-2xl font-bold text-gray-900">תרומות ועסקאות</h1>
+        <p className="mt-1 text-sm text-gray-500">
+          הזנת תרומות ידנית וצפייה בהיסטוריית עסקאות בזמן אמת
+        </p>
+      </div>
+
+      {/* Success toast */}
+      {successMsg && (
+        <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm font-medium text-green-700">
+          {successMsg}
+        </div>
+      )}
+
+      {/* Donation form */}
+      <DonationForm
+        boys={boys}
+        folders={folders}
+        onSaved={() => showSuccess("התרומה נשמרה בהצלחה")}
+      />
+
+      {/* Transaction history */}
+      <div>
+        <h2 className="mb-3 text-base font-semibold text-gray-800">
+          היסטוריית עסקאות
+        </h2>
+        {loading ? (
+          <div className="flex items-center justify-center py-16">
+            <div className="h-8 w-8 animate-spin rounded-full border-4 border-indigo-600 border-t-transparent" />
+          </div>
+        ) : (
+          <TransactionHistoryTable
+            transactions={transactions}
+            cancellingId={cancellingId}
+            onCancel={handleCancel}
+          />
+        )}
+      </div>
+    </div>
+  );
+}

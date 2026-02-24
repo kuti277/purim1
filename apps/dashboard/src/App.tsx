@@ -4,6 +4,7 @@ import { ProtectedRoute } from "./router/ProtectedRoute";
 import { DashboardLayout } from "./layouts/DashboardLayout";
 import { DashboardHomePage } from "./pages/DashboardHomePage";
 import { FoldersPage } from "./pages/FoldersPage";
+import { TransactionsPage } from "./pages/TransactionsPage";
 import { LoginPage } from "./pages/LoginPage";
 
 /**
@@ -13,8 +14,9 @@ import { LoginPage } from "./pages/LoginPage";
  *  /                     → ProtectedRoute      (auth guard + loading state)
  *    /                   →   DashboardLayout   (persistent shell with header + sidebar)
  *      / (index)         →     DashboardHomePage
- *      /field            →     FoldersPage     (field & folders management with SIP dialer)
- *      /workers          →     WorkersPage     (added in Step 2.7)
+ *      /field            →     FoldersPage          (field & folders management with SIP dialer)
+ *      /transactions     →     TransactionsPage     (manual donations + transaction history)
+ *      /workers          →     WorkersPage          (added in Step 2.7)
  */
 export default function App() {
   return (
@@ -29,6 +31,7 @@ export default function App() {
             <Route element={<DashboardLayout />}>
               <Route index element={<DashboardHomePage />} />
               <Route path="field" element={<FoldersPage />} />
+              <Route path="transactions" element={<TransactionsPage />} />
               {/* Step 2.7: <Route path="workers" element={<WorkersPage />} /> */}
             </Route>
           </Route>
