@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(cd:*)"
+      "Bash(cd:*)",
+      "Bash(cd /c/Users/user1/Desktop/purim1 && pnpm install 2>&1)"
     ]
   }
 }

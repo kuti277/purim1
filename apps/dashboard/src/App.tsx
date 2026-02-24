@@ -3,6 +3,7 @@ import { AuthProvider } from "./contexts/AuthContext";
 import { ProtectedRoute } from "./router/ProtectedRoute";
 import { DashboardLayout } from "./layouts/DashboardLayout";
 import { DashboardHomePage } from "./pages/DashboardHomePage";
+import { FoldersPage } from "./pages/FoldersPage";
 import { LoginPage } from "./pages/LoginPage";
 
 /**
@@ -12,6 +13,7 @@ import { LoginPage } from "./pages/LoginPage";
  *  /                     → ProtectedRoute      (auth guard + loading state)
  *    /                   →   DashboardLayout   (persistent shell with header + sidebar)
  *      / (index)         →     DashboardHomePage
+ *      /field            →     FoldersPage     (field & folders management with SIP dialer)
  *      /workers          →     WorkersPage     (added in Step 2.7)
  */
 export default function App() {
@@ -26,6 +28,7 @@ export default function App() {
           <Route element={<ProtectedRoute />}>
             <Route element={<DashboardLayout />}>
               <Route index element={<DashboardHomePage />} />
+              <Route path="field" element={<FoldersPage />} />
               {/* Step 2.7: <Route path="workers" element={<WorkersPage />} /> */}
             </Route>
           </Route>

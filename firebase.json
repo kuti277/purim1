@@ -1,39 +1,4 @@
 {
-  "hosting": [
-    {
-      "target": "showcase",
-      "public": "apps/showcase/dist",
-      "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
-      "rewrites": [
-        {
-          "source": "**",
-          "destination": "/index.html"
-        }
-      ]
-    },
-    {
-      "target": "dashboard",
-      "public": "apps/dashboard/dist",
-      "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
-      "rewrites": [
-        {
-          "source": "**",
-          "destination": "/index.html"
-        }
-      ]
-    },
-    {
-      "target": "ivr-admin",
-      "public": "apps/ivr-admin/dist",
-      "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
-      "rewrites": [
-        {
-          "source": "**",
-          "destination": "/index.html"
-        }
-      ]
-    }
-  ],
   "functions": [
     {
       "source": "functions",
@@ -51,11 +16,9 @@
     "rules": "firestore.rules",
     "indexes": "firestore.indexes.json"
   },
-  "storage": [
-    {
-      "rules": "storage.rules"
-    }
-  ],
+  "storage": {
+    "rules": "storage.rules"
+  },
   "emulators": {
     "auth": {
       "port": 9099
@@ -65,9 +28,6 @@
     },
     "firestore": {
       "port": 8080
-    },
-    "hosting": {
-      "port": 5000
     },
     "storage": {
       "port": 9199
