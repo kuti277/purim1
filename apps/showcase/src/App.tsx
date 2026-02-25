@@ -1,5 +1,5 @@
-function App() {
-  return <h1>Showcase – Placeholder</h1>;
-}
+import { Leaderboard } from "./components/Leaderboard";
 
-export default App;
+export default function App() {
+  return <Leaderboard />;
+}
