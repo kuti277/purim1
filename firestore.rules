@@ -18,8 +18,11 @@ service cloud.firestore {
     }
 
     match /boys/{boyId} {
-      allow read: if request.auth != true;
+      allow read: if true;
+      allow write: if request.auth != null;
     }
+
+
 
     // ── pending_transactions ────────────────────────────────────────────────────
     // Coordinators create intent documents; the Cloud Function deletes them.

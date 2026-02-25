@@ -3,6 +3,7 @@ import { AuthProvider } from "./contexts/AuthContext";
 import { ProtectedRoute } from "./router/ProtectedRoute";
 import { DashboardLayout } from "./layouts/DashboardLayout";
 import { DashboardHomePage } from "./pages/DashboardHomePage";
+import { BoysPage } from "./pages/BoysPage";
 import { FoldersPage } from "./pages/FoldersPage";
 import { TransactionsPage } from "./pages/TransactionsPage";
 import { LoginPage } from "./pages/LoginPage";
@@ -16,7 +17,7 @@ import { LoginPage } from "./pages/LoginPage";
  *      / (index)         →     DashboardHomePage
  *      /field            →     FoldersPage          (field & folders management with SIP dialer)
  *      /transactions     →     TransactionsPage     (manual donations + transaction history)
- *      /workers          →     WorkersPage          (added in Step 2.7)
+ *      /workers          →     BoysPage             (collectors / boys management)
  */
 export default function App() {
   return (
@@ -32,7 +33,7 @@ export default function App() {
               <Route index element={<DashboardHomePage />} />
               <Route path="field" element={<FoldersPage />} />
               <Route path="transactions" element={<TransactionsPage />} />
-              {/* Step 2.7: <Route path="workers" element={<WorkersPage />} /> */}
+              <Route path="workers" element={<BoysPage />} />
             </Route>
           </Route>
         </Routes>
