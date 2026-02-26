@@ -208,6 +208,23 @@ function useSettings(): { settings: GlobalSettings; loading: boolean } {
   return { settings, loading };
 }
 
+/**
+ * Listens to settings/ticker in real time.
+ * Returns the custom admin message, or an empty string if none is set.
+ */
+function useTickerMessage(): string {
+  const [message, setMessage] = useState("");
+  useEffect(() => {
+    return onSnapshot(
+      doc(clientDb, "settings", "ticker"),
+      (snap) => {
+        setMessage(snap.exists() ? ((snap.data().message as string) ?? "") : "");
+      },
+    );
+  }, []);
+  return message;
+}
+
 // ─── Primitives ─────────────────────────────────────────────────────────────────
 
 function Bar({ raised, goal, cls }: { raised: number; goal: number; cls: string }) {
@@ -774,9 +791,23 @@ function InFieldPanel({ boys, className = "" }: { boys: Boy[]; className?: strin
 
 // ─── Footer: News Ticker ─────────────────────────────────────────────────────────
 
-function Ticker({ boys, txs }: { boys: Boy[]; txs: Transaction[] }) {
+function Ticker({
+  boys,
+  txs,
+  customMessage,
+}: {
+  boys: Boy[];
+  txs: Transaction[];
+  customMessage: string;
+}) {
   const content = useMemo(() => {
     const parts: string[] = [];
+
+    // Custom admin message appears first and prominently
+    if (customMessage.trim()) {
+      parts.push(`📢 ${customMessage.trim()}`);
+    }
+
     txs.slice(0, 5).forEach((tx) => {
       const base = `💳 ${tx.targetName || "תלמיד"} התרים ${nis(tx.amount)}`;
       parts.push(tx.dedication ? `${base} — הקדשה: ${tx.dedication}` : base);
@@ -785,7 +816,7 @@ function Ticker({ boys, txs }: { boys: Boy[]; txs: Transaction[] }) {
       parts.push(`${MEDALS[i]} מקום ${i + 1}: ${b.name} — ${nis(b.totalRaised)}`);
     });
     return parts.join("   ·   ");
-  }, [boys, txs]);
+  }, [boys, txs, customMessage]);
 
   if (!content) {
     return <div className="h-10 overflow-hidden border-t border-white/10 bg-gray-900/90" />;
@@ -823,6 +854,7 @@ export function Leaderboard() {
   const { txs,  loading: tl }     = useRecentTransactions();
   const dailyTxs                  = useDailyTransactions();
   const { settings, loading: sl } = useSettings();
+  const tickerMessage             = useTickerMessage();
 
   // ── Audio refs (three separate players) ──────────────────────────────────────
   const bgMusicRef  = useRef<HTMLAudioElement>(null);
@@ -1054,7 +1086,7 @@ export function Leaderboard() {
 
             {/* ── Footer: ticker + audio unlock button ── */}
             <div className="relative shrink-0">
-              <Ticker boys={boys} txs={txs} />
+              <Ticker boys={boys} txs={txs} customMessage={tickerMessage} />
               {/*
                * Audio unlock button — browsers block autoplay until the user
                * interacts with the page. Clicking this unlocks the audio context

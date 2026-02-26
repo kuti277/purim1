@@ -68,6 +68,16 @@ function IconSettings({ active }: { active: boolean }) {
   );
 }
 
+function IconTicker({ active }: { active: boolean }) {
+  return (
+    <svg className={`h-5 w-5 shrink-0 ${active ? "text-white" : "text-slate-500"}`}
+      fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75} aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round"
+        d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25H12" />
+    </svg>
+  );
+}
+
 function IconBinder({ active }: { active: boolean }) {
   return (
     <svg className={`h-5 w-5 shrink-0 ${active ? "text-white" : "text-slate-500"}`}
@@ -239,6 +249,18 @@ export function DashboardLayout() {
                 <>
                   <IconReceipt active={isActive} />
                   <span>תרומות ועסקאות</span>
+                  {isActive && (
+                    <span className="mr-auto inline-flex h-1.5 w-1.5 rounded-full bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.9)]" />
+                  )}
+                </>
+              )}
+            </NavLink>
+
+            <NavLink to="/ticker" className={navLinkClass}>
+              {({ isActive }) => (
+                <>
+                  <IconTicker active={isActive} />
+                  <span>ניהול טיקר</span>
                   {isActive && (
                     <span className="mr-auto inline-flex h-1.5 w-1.5 rounded-full bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.9)]" />
                   )}

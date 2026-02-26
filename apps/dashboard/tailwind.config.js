@@ -24,6 +24,15 @@ export default {
         "neon-cyan":    "#00F5FF",
         "neon-orange":  "#FF6A00",
       },
+      keyframes: {
+        marquee: {
+          "0%":   { transform: "translateX(0%)" },
+          "100%": { transform: "translateX(-50%)" },
+        },
+      },
+      animation: {
+        marquee: "marquee 18s linear infinite",
+      },
       boxShadow: {
         "neon-fuchsia": "0 0 20px rgba(232,121,249,0.45), 0 0 40px rgba(232,121,249,0.15)",
         "neon-purple":  "0 0 20px rgba(168,85,247,0.45), 0 0 40px rgba(168,85,247,0.15)",
