@@ -115,6 +115,24 @@ function useTransactions(): TxRow[] {
   return txs;
 }
 
+interface BinderSummary { id: string; status: string; statusUpdatedAt?: Timestamp }
+
+function useBinders(): BinderSummary[] {
+  const [binders, setBinders] = useState<BinderSummary[]>([]);
+  useEffect(() => {
+    return onSnapshot(
+      collection(clientDb, "binders"),
+      (snap) => setBinders(snap.docs.map((d) => ({ id: d.id, ...d.data() } as BinderSummary))),
+    );
+  }, []);
+  return binders;
+}
+
+function isToday(ts: Timestamp | undefined): boolean {
+  if (!ts) return false;
+  return ts.toDate().toDateString() === new Date().toDateString();
+}
+
 // ─── Stat card variants (all class strings are complete for Tailwind scanning) ──
 
 const STAT_STYLES = {
@@ -137,6 +155,16 @@ const STAT_STYLES = {
     card:   "rounded-xl bg-slate-900 border border-fuchsia-500/30 p-5 shadow-[0_0_25px_rgba(217,70,239,0.08)]",
     label:  "text-xs font-bold uppercase tracking-widest text-fuchsia-400",
     accent: "h-0.5 w-8 rounded-full bg-fuchsia-400 mt-3",
+  },
+  violet: {
+    card:   "rounded-xl bg-slate-900 border border-violet-500/30 p-5 shadow-[0_0_25px_rgba(139,92,246,0.08)]",
+    label:  "text-xs font-bold uppercase tracking-widest text-violet-400",
+    accent: "h-0.5 w-8 rounded-full bg-violet-400 mt-3",
+  },
+  teal: {
+    card:   "rounded-xl bg-slate-900 border border-teal-500/30 p-5 shadow-[0_0_25px_rgba(20,184,166,0.08)]",
+    label:  "text-xs font-bold uppercase tracking-widest text-teal-400",
+    accent: "h-0.5 w-8 rounded-full bg-teal-400 mt-3",
   },
 } as const;
 
@@ -614,8 +642,9 @@ function TransactionSection({ txs }: { txs: TxRow[] }) {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export function DashboardHomePage() {
-  const boys = useBoys();
-  const txs  = useTransactions();
+  const boys    = useBoys();
+  const txs     = useTransactions();
+  const binders = useBinders();
 
   // ── Quick stats (computed) ────────────────────────────────────────────────
   const totalRaised = useMemo(() => boys.reduce((s, b) => s + b.totalRaised, 0), [boys]);
@@ -625,6 +654,15 @@ export function DashboardHomePage() {
     return txs.filter((tx) => tx.date.toDate().toDateString() === today && tx.status !== "cancelled").length;
   }, [txs]);
   const topBoy = boys[0] ?? null;
+
+  const bindersCollectingToday = useMemo(
+    () => binders.filter((b) => b.status === "collecting" && isToday(b.statusUpdatedAt)).length,
+    [binders],
+  );
+  const bindersCollectedToday = useMemo(
+    () => binders.filter((b) => b.status === "collected" && isToday(b.statusUpdatedAt)).length,
+    [binders],
+  );
 
   return (
     <div className="space-y-7" dir="rtl">
@@ -650,7 +688,7 @@ export function DashboardHomePage() {
       </div>
 
       {/* ── Stats strip ── */}
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">
         <StatCard
           label="סה״כ נגבה"
           value={nis(totalRaised)}
@@ -676,6 +714,19 @@ export function DashboardHomePage() {
           sub={topBoy ? nis(topBoy.totalRaised) : ""}
           icon="🏆"
           variant="fuchsia"
+        />
+        <StatCard
+          label="קלסרים באיסוף היום"
+          value={String(bindersCollectingToday)}
+          sub={`${binders.length} קלסרים סה״כ`}
+          icon="📂"
+          variant="violet"
+        />
+        <StatCard
+          label="קלסרים שנאספו היום"
+          value={String(bindersCollectedToday)}
+          icon="✅"
+          variant="teal"
         />
       </div>
 

@@ -7,6 +7,7 @@ import { BoysPage } from "./pages/BoysPage";
 import { FoldersPage } from "./pages/FoldersPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { TransactionsPage } from "./pages/TransactionsPage";
+import { BindersPage } from "./pages/BindersPage";
 import { LoginPage } from "./pages/LoginPage";
 
 /**
@@ -36,6 +37,7 @@ export default function App() {
               <Route path="field" element={<FoldersPage />} />
               <Route path="transactions" element={<TransactionsPage />} />
               <Route path="workers" element={<BoysPage />} />
+              <Route path="binders" element={<BindersPage />} />
               <Route path="settings" element={<SettingsPage />} />
             </Route>
           </Route>
