@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   addDoc,
   collection,
@@ -7,9 +7,14 @@ import {
   onSnapshot,
   orderBy,
   query,
+  Timestamp,
   updateDoc,
+  where,
   writeBatch,
 } from "firebase/firestore";
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+} from "recharts";
 import * as XLSX from "xlsx";
 import { clientDb } from "../lib/firebase";
 
@@ -403,6 +408,183 @@ function BoyModal({ mode, boy, onClose, onSaved }: ModalProps) {
   );
 }
 
+// ─── Boy Analytics Modal ──────────────────────────────────────────────────────
+
+interface BoyTxRow { amount: number; date: Timestamp; status: string; }
+type ChartGran = "hours" | "days";
+
+function BoyAnalyticsModal({ boy, onClose }: { boy: BoyDoc; onClose: () => void }) {
+  const [gran, setGran] = useState<ChartGran>("hours");
+  const [txs, setTxs]  = useState<BoyTxRow[]>([]);
+
+  useEffect(() => {
+    return onSnapshot(
+      query(collection(clientDb, "transactions"), where("targetId", "==", boy.id)),
+      (snap) => setTxs(snap.docs.map((d) => d.data() as BoyTxRow)),
+    );
+  }, [boy.id]);
+
+  // Close on Escape
+  useEffect(() => {
+    const fn = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", fn);
+    return () => window.removeEventListener("keydown", fn);
+  }, [onClose]);
+
+  const active = useMemo(() => txs.filter((t) => t.status !== "cancelled"), [txs]);
+
+  const chartData = useMemo(() => {
+    if (gran === "hours") {
+      const today = new Date().toDateString();
+      const buckets: Record<number, number> = {};
+      active.forEach((t) => {
+        const d = t.date.toDate();
+        if (d.toDateString() !== today) return;
+        buckets[d.getHours()] = (buckets[d.getHours()] ?? 0) + t.amount;
+      });
+      return Array.from({ length: 24 }, (_, h) => ({
+        label: `${String(h).padStart(2, "0")}:00`,
+        amount: buckets[h] ?? 0,
+      }));
+    } else {
+      const dayMap: Record<string, { sort: number; amount: number }> = {};
+      active.forEach((t) => {
+        const d    = t.date.toDate();
+        const key  = d.toLocaleDateString("he-IL", { day: "2-digit", month: "2-digit" });
+        const sort = d.getFullYear() * 10000 + (d.getMonth() + 1) * 100 + d.getDate();
+        if (!dayMap[key]) dayMap[key] = { sort, amount: 0 };
+        dayMap[key].amount += t.amount;
+      });
+      return Object.entries(dayMap)
+        .sort(([, a], [, b]) => a.sort - b.sort)
+        .slice(-14)
+        .map(([label, { amount }]) => ({ label, amount }));
+    }
+  }, [active, gran]);
+
+  const totalActive = useMemo(() => active.reduce((s, t) => s + t.amount, 0), [active]);
+  const txCount     = active.length;
+  const hasData     = chartData.some((d) => d.amount > 0);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div className="w-full max-w-2xl rounded-2xl border border-lime-500/20 bg-slate-900 shadow-[0_0_80px_rgba(163,230,53,0.08)] overflow-hidden">
+
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-slate-800 px-6 py-4">
+          <div>
+            <h2 className="text-base font-black text-white">ניתוח ביצועים — {boy.name}</h2>
+            <div className="h-0.5 w-10 mt-1.5 rounded-full bg-gradient-to-l from-lime-400 to-emerald-400" />
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-800 hover:text-white transition-colors"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+
+        <div className="p-6 space-y-4">
+
+          {/* Quick stats */}
+          <div className="grid grid-cols-3 gap-3">
+            {[
+              { label: 'סה"כ גויס',   value: `₪${totalActive.toLocaleString("he-IL")}` },
+              { label: "עסקאות",       value: String(txCount) },
+              { label: "ממוצע לעסקה", value: txCount > 0 ? `₪${Math.round(totalActive / txCount).toLocaleString("he-IL")}` : "—" },
+            ].map(({ label, value }) => (
+              <div key={label} className="rounded-xl bg-slate-800/70 border border-slate-700/60 p-3 text-center">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-lime-400/70">{label}</p>
+                <p className="mt-0.5 text-xl font-black text-white">{value}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* Granularity toggle */}
+          <div className="flex items-center gap-2">
+            {(["hours", "days"] as const).map((g) => (
+              <button
+                key={g}
+                type="button"
+                onClick={() => setGran(g)}
+                className={`rounded-xl px-4 py-2 text-xs font-bold transition-all ${
+                  gran === g
+                    ? "bg-lime-500/20 text-lime-300 ring-1 ring-lime-500/40"
+                    : "bg-slate-800 border border-slate-700 text-slate-500 hover:text-slate-300"
+                }`}
+              >
+                {g === "hours" ? "לפי שעות" : "לפי ימים"}
+              </button>
+            ))}
+            <span className="mr-auto text-xs text-slate-600">
+              {gran === "hours" ? "היום (0–23:00)" : "עד 14 הימים האחרונים"}
+            </span>
+          </div>
+
+          {/* Bar chart */}
+          <div className="rounded-xl bg-slate-950 border border-slate-800 px-2 py-4">
+            {!hasData ? (
+              <div className="flex h-[200px] items-center justify-center">
+                <p className="text-sm text-slate-600">
+                  {gran === "hours" ? "אין עסקאות היום עדיין" : "אין נתוני ימים קודמים"}
+                </p>
+              </div>
+            ) : (
+              <ResponsiveContainer width="100%" height={200}>
+                <BarChart data={chartData} margin={{ top: 5, right: 5, left: 0, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="limeBarGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%"   stopColor="#a3e635" stopOpacity={0.9} />
+                      <stop offset="100%" stopColor="#4ade80" stopOpacity={0.7} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(71,85,105,0.25)" vertical={false} />
+                  <XAxis
+                    dataKey="label"
+                    tick={{ fill: "#475569", fontSize: 10 }}
+                    tickLine={false}
+                    axisLine={false}
+                    interval={gran === "hours" ? 3 : 0}
+                  />
+                  <YAxis
+                    tick={{ fill: "#475569", fontSize: 10 }}
+                    tickLine={false}
+                    axisLine={false}
+                    tickFormatter={(v: number) => `₪${v}`}
+                    width={60}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      background: "#0f172a",
+                      border: "1px solid rgba(163,230,53,0.3)",
+                      borderRadius: 10,
+                      fontSize: 12,
+                      boxShadow: "0 0 16px rgba(163,230,53,0.1)",
+                    }}
+                    labelStyle={{ color: "#64748b", marginBottom: 4 }}
+                    itemStyle={{ color: "#a3e635" }}
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    formatter={(value: any) => [`₪${Number(value).toLocaleString("he-IL")}`, "גויס"]}
+                    cursor={{ fill: "rgba(163,230,53,0.05)" }}
+                  />
+                  <Bar dataKey="amount" fill="url(#limeBarGrad)" radius={[4, 4, 0, 0]} maxBarSize={42} />
+                </BarChart>
+              </ResponsiveContainer>
+            )}
+          </div>
+
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Empty state ───────────────────────────────────────────────────────────────
 
 function EmptyState({ onAdd }: { onAdd: () => void }) {
@@ -460,6 +642,9 @@ export function BoysPage() {
   // Import state
   const [importing, setImporting] = useState(false);
   const importRef = useRef<HTMLInputElement>(null);
+
+  // Analytics modal
+  const [analyticsTarget, setAnalyticsTarget] = useState<BoyDoc | null>(null);
 
   function showSuccess(msg: string) {
     setSuccessMsg(msg);
@@ -710,6 +895,20 @@ export function BoysPage() {
                           </div>
                         ) : (
                           <div className="flex items-center gap-2">
+                            {/* Analytics */}
+                            <button
+                              type="button"
+                              onClick={() => setAnalyticsTarget(boy)}
+                              className="
+                                rounded-lg border border-lime-500/40 bg-transparent px-3 py-1.5
+                                text-xs font-medium text-lime-400 transition-colors
+                                hover:bg-lime-950/40 hover:border-lime-400/60
+                                focus:outline-none focus:ring-2 focus:ring-lime-500 focus:ring-offset-1 focus:ring-offset-slate-950
+                              "
+                              title="ניתוח ביצועים"
+                            >
+                              📊
+                            </button>
                             <button
                               type="button"
                               onClick={() => openEdit(boy)}
@@ -746,13 +945,21 @@ export function BoysPage() {
         </div>
       )}
 
-      {/* Modal — rendered in a portal-like position via fixed positioning */}
+      {/* Edit / Add modal */}
       {modal && (
         <BoyModal
           mode={modal.mode}
           boy={modal.boy}
           onClose={() => setModal(null)}
           onSaved={showSuccess}
+        />
+      )}
+
+      {/* Analytics modal */}
+      {analyticsTarget && (
+        <BoyAnalyticsModal
+          boy={analyticsTarget}
+          onClose={() => setAnalyticsTarget(null)}
         />
       )}
 

@@ -7,6 +7,9 @@ import {
   query,
   Timestamp,
 } from "firebase/firestore";
+import {
+  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
+} from "recharts";
 import { clientDb } from "../lib/firebase";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -269,38 +272,89 @@ const TX_INPUT =
 
 const TX_LABEL = "block mb-1 text-[10px] font-bold uppercase tracking-widest text-slate-500";
 
-// ─── Section 1: Chart placeholder (CYAN) ─────────────────────────────────────
+// ─── Section 1: Donations Trend Chart (CYAN) ──────────────────────────────────
 
-function ChartSection() {
+function ChartSection({ txs }: { txs: TxRow[] }) {
+  // Build cumulative hourly data for today from real transactions
+  const hourlyData = useMemo(() => {
+    const today = new Date().toDateString();
+    const buckets: Record<number, number> = {};
+    txs.forEach((tx) => {
+      if (tx.status === "cancelled") return;
+      const d = tx.date.toDate();
+      if (d.toDateString() !== today) return;
+      const h = d.getHours();
+      buckets[h] = (buckets[h] ?? 0) + tx.amount;
+    });
+    let cum = 0;
+    return Array.from({ length: 24 }, (_, h) => {
+      cum += buckets[h] ?? 0;
+      return { hour: `${String(h).padStart(2, "0")}:00`, amount: cum };
+    });
+  }, [txs]);
+
+  const hasData = hourlyData.some((d) => d.amount > 0);
+
   return (
     <SectionCard variant="cyan">
-      <SectionHeader icon="📈" title="גרף תרומות לפי שעות" variant="cyan" />
-      <div className="p-6">
-        <div className="
-          h-64 rounded-xl
-          bg-slate-950 border border-cyan-500/30
-          shadow-[inset_0_0_50px_rgba(6,182,212,0.05),0_0_0_1px_rgba(6,182,212,0.1)]
-          flex flex-col items-center justify-center gap-3
-        ">
-          {/* Decorative grid lines */}
-          <div className="absolute inset-6 opacity-10" aria-hidden>
-            <div className="border-b border-cyan-400 absolute inset-x-0" style={{ top: "25%" }} />
-            <div className="border-b border-cyan-400 absolute inset-x-0" style={{ top: "50%" }} />
-            <div className="border-b border-cyan-400 absolute inset-x-0" style={{ top: "75%" }} />
+      <SectionHeader icon="📈" title='גרף תרומות מצטבר — היום' variant="cyan" />
+      <div className="px-2 pt-4 pb-6">
+        {!hasData ? (
+          <div className="flex h-60 items-center justify-center gap-3 flex-col">
+            <svg className="h-10 w-10 text-cyan-500/30" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 13.125C3 12.504 3.504 12 4.125 12h2.25c.621 0 1.125.504 1.125 1.125v6.75C7.5 20.496 6.996 21 6.375 21h-2.25A1.125 1.125 0 013 19.875v-6.75zM9.75 8.625c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125v11.25c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V8.625zM16.5 4.125c0-.621.504-1.125 1.125-1.125h2.25C20.496 3 21 3.504 21 4.125v15.75c0 .621-.504 1.125-1.125 1.125h-2.25a1.125 1.125 0 01-1.125-1.125V4.125z" />
+            </svg>
+            <p className="text-sm text-slate-600">אין עסקאות היום עדיין — הגרף יופיע ברגע שתיכנס תרומה ראשונה</p>
           </div>
-          <svg className="h-14 w-14 text-cyan-500/40" fill="none" viewBox="0 0 24 24"
-            stroke="currentColor" strokeWidth={1} aria-hidden="true">
-            <path strokeLinecap="round" strokeLinejoin="round"
-              d="M7 17L1 11l6-6M1 11h14m2 6l6-6-6-6M15 11h6" />
-            <path strokeLinecap="round" strokeLinejoin="round" d="M2 20h20M5 20V8l5-5 4 8 4-5v14" />
-          </svg>
-          <p className="text-lg font-black tracking-tight text-neon-cyan neon-text-cyan">
-            גרף אסיפות לפי שעות (בקרוב)
-          </p>
-          <p className="text-xs text-slate-600 tracking-wider">
-            Chart.js · נתוני זמן אמת · 24H view
-          </p>
-        </div>
+        ) : (
+          <ResponsiveContainer width="100%" height={240}>
+            <AreaChart data={hourlyData} margin={{ top: 10, right: 20, left: 10, bottom: 0 }}>
+              <defs>
+                <linearGradient id="cyanAreaGrad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%"  stopColor="#06b6d4" stopOpacity={0.30} />
+                  <stop offset="95%" stopColor="#06b6d4" stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(6,182,212,0.08)" vertical={false} />
+              <XAxis
+                dataKey="hour"
+                tick={{ fill: "#475569", fontSize: 11 }}
+                tickLine={false}
+                axisLine={{ stroke: "rgba(71,85,105,0.2)" }}
+                interval={3}
+              />
+              <YAxis
+                tick={{ fill: "#475569", fontSize: 11 }}
+                tickLine={false}
+                axisLine={false}
+                tickFormatter={(v: number) => `₪${v.toLocaleString("he-IL")}`}
+                width={72}
+              />
+              <Tooltip
+                contentStyle={{
+                  background: "#0f172a",
+                  border: "1px solid rgba(6,182,212,0.35)",
+                  borderRadius: 12,
+                  fontSize: 12,
+                  boxShadow: "0 0 20px rgba(6,182,212,0.15)",
+                }}
+                labelStyle={{ color: "#64748b", marginBottom: 4 }}
+                itemStyle={{ color: "#22d3ee" }}
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              formatter={(value: any) => [`₪${Number(value).toLocaleString("he-IL")}`, 'סה"כ מצטבר']}
+              />
+              <Area
+                type="monotone"
+                dataKey="amount"
+                stroke="#06b6d4"
+                strokeWidth={2.5}
+                fill="url(#cyanAreaGrad)"
+                dot={false}
+                activeDot={{ r: 5, fill: "#06b6d4", stroke: "#0f172a", strokeWidth: 2 }}
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+        )}
       </div>
     </SectionCard>
   );
@@ -731,7 +785,7 @@ export function DashboardHomePage() {
       </div>
 
       {/* ── Section 1: Chart (Cyan) ── */}
-      <ChartSection />
+      <ChartSection txs={txs} />
 
       {/* ── Section 2: Boys performance (Lime) ── */}
       <BoysSection boys={boys} />
