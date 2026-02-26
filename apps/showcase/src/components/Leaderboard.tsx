@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   collection,
+  doc,
   limit,
   onSnapshot,
   orderBy,
@@ -31,6 +32,22 @@ interface Transaction {
   status: string;
 }
 
+interface Announcement {
+  id: string;
+  icon: string;
+  text: string;
+}
+
+interface GlobalSettings {
+  campaignName: string;
+  globalGoal: number;
+  announcements: Announcement[];
+  audioUrl: string;
+  audioVolume: number;    // 0 – 100
+  audioPlaying: boolean;
+  playSlogan: boolean;
+}
+
 // ─── Color Zone ─────────────────────────────────────────────────────────────────
 // All class strings written in full so Tailwind's scanner never purges them.
 
@@ -54,15 +71,17 @@ const Z: Record<Zone, { text: string; bar: string; ring: string; glow: string; d
 
 const MEDALS = ["🥇", "🥈", "🥉"];
 
-const PROFILE_URL  = "https://placehold.co/100x100/1e1b4b/a5b4fc?text=%F0%9F%8F%86";
-const CONFETTI_URL = "https://placehold.co/100x100/00000000/00000000?text=";
+const SHIUR_ORDER = ["שיעור א'", "שיעור ב'", "שיעור ג'", "קיבוץ נמוך", "קיבוץ גבוה", "תרומה כללית"];
 
-const ANNOUNCEMENTS = [
-  { id: 1, icon: "📢", text: "מגבית פורים נפתחת רשמית! בהצלחה לכולם — יחד נשבור את היעד.", ts: "10:00" },
-  { id: 2, icon: "🎯", text: "שיעור א׳ עבר את יעד ה-5,000 ₪ הראשון! כל הכבוד לכולם.", ts: "11:15" },
-  { id: 3, icon: "🏆", text: "הנהלה: מוביל ה-24 שעות הכריז על עוד סיבוב — ברכות!", ts: "12:30" },
-  { id: 4, icon: "⚡", text: "נותרו 2 שעות לסיום הסשן הראשון. כולם להתאמץ!", ts: "13:00" },
-] as const;
+const SETTINGS_DEFAULTS: GlobalSettings = {
+  campaignName: "מגבית פורים",
+  globalGoal: 0,
+  announcements: [],
+  audioUrl: "",
+  audioVolume: 70,
+  audioPlaying: false,
+  playSlogan: false,
+};
 
 // ─── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -127,7 +146,11 @@ function useRecentTransactions(): { txs: Transaction[]; loading: boolean } {
     return onSnapshot(
       query(collection(clientDb, "transactions"), orderBy("date", "desc"), limit(10)),
       (snap) => {
-        setTxs(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Transaction)));
+        setTxs(
+          snap.docs
+            .map((d) => ({ id: d.id, ...d.data() } as Transaction))
+            .filter((t) => t.status !== "cancelled"),
+        );
         setLoading(false);
       },
     );
@@ -161,6 +184,30 @@ function useDailyTransactions(): Transaction[] {
   return txs;
 }
 
+/**
+ * Listens to settings/global in real time.
+ * Always returns a fully-populated settings object (merged with defaults)
+ * so consumers never receive undefined fields.
+ */
+function useSettings(): { settings: GlobalSettings; loading: boolean } {
+  const [settings, setSettings] = useState<GlobalSettings>(SETTINGS_DEFAULTS);
+  const [loading, setLoading]   = useState(true);
+  useEffect(() => {
+    return onSnapshot(
+      doc(clientDb, "settings", "global"),
+      (snap) => {
+        setSettings(
+          snap.exists()
+            ? { ...SETTINGS_DEFAULTS, ...(snap.data() as Partial<GlobalSettings>) }
+            : SETTINGS_DEFAULTS,
+        );
+        setLoading(false);
+      },
+    );
+  }, []);
+  return { settings, loading };
+}
+
 // ─── Primitives ─────────────────────────────────────────────────────────────────
 
 function Bar({ raised, goal, cls }: { raised: number; goal: number; cls: string }) {
@@ -180,8 +227,9 @@ function Bar({ raised, goal, cls }: { raised: number; goal: number; cls: string 
 }
 
 /**
- * Generic panel card used by most columns.
- * className is forwarded to the outer div so callers can inject flex-1, min-h-0, etc.
+ * Generic panel card. className is forwarded to the outer div so callers can
+ * inject flex-1, min-h-0, etc. The inner content area uses overflow-y-auto
+ * (suitable for static lists like ShiurPanel).
  */
 function Panel({
   title,
@@ -213,26 +261,36 @@ function Panel({
 
 // ─── Header: Campaign Name ───────────────────────────────────────────────────────
 
-function CampaignNameCard() {
+function CampaignNameCard({ name: _name }: { name: string }) {
   return (
-    <div className="flex flex-col items-end justify-center rounded-2xl bg-gradient-to-br from-indigo-950 to-gray-900 p-6 ring-1 ring-indigo-500/20">
-      <div className="flex items-center gap-2">
-        <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-green-400 shadow-lg shadow-green-400/60" />
-        <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-green-400">
-          שידור חי
-        </span>
+    <div className="flex h-full items-center gap-5 rounded-2xl bg-gradient-to-br from-indigo-950 to-gray-900 px-6 ring-1 ring-indigo-500/20">
+      <img src="/assets/logo.png" alt="Logo" className="h-36 w-auto shrink-0 drop-shadow-xl" />
+      <div className="flex min-w-0 flex-col">
+        <h1 className="text-2xl font-bold leading-snug text-white">
+          יוצאים להתקפה
+        </h1>
+        <div className="mt-2 flex items-center gap-1.5">
+          <span className="h-2 w-2 animate-pulse rounded-full bg-green-400 shadow shadow-green-400/60" />
+          <span className="text-[10px] font-medium tracking-widest text-green-400/70">
+            שידור חי
+          </span>
+        </div>
       </div>
-      <h1 className="mt-2 text-right text-[2rem] font-bold leading-tight text-white">
-        מגבית פורים
-      </h1>
-      <p className="mt-1 text-right text-sm text-indigo-300/50">פלטפורמת פורים</p>
     </div>
   );
 }
 
 // ─── Header: Daily Star ──────────────────────────────────────────────────────────
 
-function DailyStarCard({ boys, dailyTxs }: { boys: Boy[]; dailyTxs: Transaction[] }) {
+function DailyStarCard({
+  boys,
+  dailyTxs,
+  hasBomb,
+}: {
+  boys: Boy[];
+  dailyTxs: Transaction[];
+  hasBomb: boolean;
+}) {
   const { star, dailyAmt, isDefault } = useMemo(() => {
     if (dailyTxs.length === 0) {
       return { star: boys[0] ?? null, dailyAmt: 0, isDefault: true };
@@ -278,22 +336,15 @@ function DailyStarCard({ boys, dailyTxs }: { boys: Boy[]; dailyTxs: Transaction[
       </div>
 
       <p className="relative z-10 text-[10px] font-bold uppercase tracking-[0.25em] text-white/30">
-        ⭐ כוכב היום
+        💥 המפגיז היומי
       </p>
 
-      {/* Profile + confetti overlay */}
+      {/* Profile image */}
       <div className="relative z-10 mt-3 h-20 w-20 shrink-0">
         <img
-          src={PROFILE_URL}
+          src="/assets/leizan.png"
           alt={`תמונת ${star.name}`}
           className={`h-full w-full rounded-full object-cover ring-4 ${z.ring}`}
-        />
-        {/* Swap CONFETTI_URL with the actual Artifont exploding-confetti asset */}
-        <img
-          src={CONFETTI_URL}
-          alt=""
-          aria-hidden
-          className="pointer-events-none absolute inset-0 h-full w-full rounded-full object-cover mix-blend-screen"
         />
       </div>
 
@@ -303,7 +354,7 @@ function DailyStarCard({ boys, dailyTxs }: { boys: Boy[]; dailyTxs: Transaction[
       >
         {star.name}
       </h2>
-      <p className="relative z-10 mt-0.5 text-xs text-white/30">שיעור {star.shiur}</p>
+      <p className="relative z-10 mt-0.5 text-xs text-white/30">{star.shiur}</p>
 
       {/* Daily / total amount */}
       <div className="relative z-10 mt-3 flex items-baseline gap-1.5">
@@ -320,20 +371,40 @@ function DailyStarCard({ boys, dailyTxs }: { boys: Boy[]; dailyTxs: Transaction[
           {p.toFixed(1)}%
         </p>
       </div>
+
+      {/*
+       * Bomb GIF overlay — shown for 30 s after any transaction > 50 ILS.
+       * Absolutely fills the card so the explosion covers the star's profile.
+       */}
+      {hasBomb && (
+        <div className="pointer-events-none absolute inset-0 z-0 flex items-center justify-center">
+          <img
+            src="/assets/bomb.gif"
+            alt=""
+            aria-hidden
+            className="h-40 w-40 object-contain drop-shadow-2xl"
+          />
+        </div>
+      )}
     </div>
   );
 }
 
 // ─── Header: Campaign Total ──────────────────────────────────────────────────────
 
-function CampaignTotalCard({ boys }: { boys: Boy[] }) {
-  const { raised, goal } = useMemo(
-    () => ({
-      raised: boys.reduce((s, b) => s + b.totalRaised, 0),
-      goal:   boys.reduce((s, b) => s + b.goal, 0),
-    }),
+function CampaignTotalCard({ boys, globalGoal }: { boys: Boy[]; globalGoal: number }) {
+  const raised = useMemo(
+    () => boys.reduce((s, b) => s + b.totalRaised, 0),
     [boys],
   );
+
+  // Use the admin-configured global goal when it's a valid positive number;
+  // otherwise fall back to the live sum of all individual boys' goals.
+  const goal = useMemo(
+    () => (globalGoal > 0 ? globalGoal : boys.reduce((s, b) => s + b.goal, 0)),
+    [globalGoal, boys],
+  );
+
   const p = pct(raised, goal);
   const z = Z[getZone(p)];
 
@@ -347,10 +418,50 @@ function CampaignTotalCard({ boys }: { boys: Boy[] }) {
       </p>
       <p className="mt-1 text-sm text-white/30">מתוך יעד {nis(goal)}</p>
       <div className="mt-4">
-        <Bar raised={raised} goal={goal} cls={z.bar} />
+        {/* Thick campaign bar — more visible than the default h-2 */}
+        <div className="h-5 w-full overflow-hidden rounded-full bg-white/10">
+          <div
+            className={`h-full rounded-full transition-all duration-1000 ${z.bar}`}
+            style={{ width: `${p}%` }}
+            role="progressbar"
+            aria-valuenow={Math.round(p)}
+            aria-valuemin={0}
+            aria-valuemax={100}
+          />
+        </div>
         <div className="mt-1.5 flex justify-between text-xs text-white/30">
           <span dir="ltr">{p.toFixed(1)}%</span>
           <span>{boys.length} משתתפים</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Header: Legend (מקרא) ───────────────────────────────────────────────────────
+
+function LegendCard() {
+  return (
+    <div className="flex flex-col justify-center rounded-2xl bg-gray-900/80 p-5 ring-1 ring-white/10">
+      <p className="mb-3 text-[10px] font-bold uppercase tracking-[0.2em] text-white/40">
+        📊 מקרא
+      </p>
+      <div className="flex flex-col gap-2">
+        <div className="flex items-center gap-2">
+          <span className="h-3 w-3 shrink-0 rounded-full bg-red-500" />
+          <span className="text-xs text-white/60">0–25%</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="h-3 w-3 shrink-0 rounded-full bg-yellow-400" />
+          <span className="text-xs text-white/60">25–50%</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="h-3 w-3 shrink-0 rounded-full bg-orange-500" />
+          <span className="text-xs text-white/60">50–90%</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="h-3 w-3 shrink-0 rounded-full bg-green-400" />
+          <span className="text-xs text-white/60">90%+</span>
         </div>
       </div>
     </div>
@@ -361,7 +472,7 @@ function CampaignTotalCard({ boys }: { boys: Boy[] }) {
 
 interface ShiurRow { name: string; raised: number; goal: number; count: number }
 
-function ShiurPanel({ boys }: { boys: Boy[] }) {
+function ShiurPanel({ boys, coinsShiurNames }: { boys: Boy[]; coinsShiurNames: Set<string> }) {
   const rows = useMemo<ShiurRow[]>(() => {
     const map = new Map<string, ShiurRow>();
     for (const b of boys) {
@@ -371,7 +482,9 @@ function ShiurPanel({ boys }: { boys: Boy[] }) {
       r.count++;
       map.set(b.shiur, r);
     }
-    return [...map.values()].sort((a, b) => b.raised - a.raised);
+    return [...map.values()]
+      .filter((r) => SHIUR_ORDER.includes(r.name))
+      .sort((a, b) => b.raised - a.raised);
   }, [boys]);
 
   return (
@@ -381,14 +494,23 @@ function ShiurPanel({ boys }: { boys: Boy[] }) {
           const p = pct(r.raised, r.goal);
           const z = Z[getZone(p)];
           return (
-            <div key={r.name} className={`rounded-xl p-3.5 ring-1 ${z.dim} ${z.ring}`}>
-              <div className="flex items-center gap-3">
+            <div key={r.name} className={`relative overflow-hidden rounded-xl p-3.5 ring-1 ${z.dim} ${z.ring}`}>
+              {/* Coins GIF — absolute background for this specific shiur row only */}
+              {coinsShiurNames.has(r.name) && (
+                <img
+                  src="/assets/coins.gif"
+                  alt=""
+                  aria-hidden
+                  className="pointer-events-none absolute inset-0 z-0 h-full w-full object-cover opacity-50"
+                />
+              )}
+              <div className="relative z-10 flex items-center gap-3">
                 <span className="shrink-0 text-xl leading-none">
                   {MEDALS[i] ?? `#${i + 1}`}
                 </span>
                 <div className="min-w-0 flex-1">
                   <div className="flex items-baseline justify-between gap-2">
-                    <p className={`truncate font-bold ${z.text}`}>שיעור {r.name}</p>
+                    <p className={`truncate font-bold ${z.text}`}>{r.name}</p>
                     <p className={`shrink-0 text-sm font-bold tabular-nums ${z.text}`}>
                       {nis(r.raised)}
                     </p>
@@ -412,9 +534,12 @@ function ShiurPanel({ boys }: { boys: Boy[] }) {
   );
 }
 
-// ─── Center Column: Recent Transactions ──────────────────────────────────────────
+// ─── Center Column: Transactions Roller ──────────────────────────────────────────
+//
+// Vertical infinite marquee — same seamless-loop technique as InFieldPanel.
+// `boys` is passed in to calculate 90% target achievement per row.
 
-function TransactionsPanel({ txs }: { txs: Transaction[] }) {
+function TransactionsPanel({ txs, boys }: { txs: Transaction[]; boys: Boy[] }) {
   // Tick every 30 s to keep time-ago labels fresh without a Firestore re-read.
   const [, tick] = useState(0);
   useEffect(() => {
@@ -422,48 +547,124 @@ function TransactionsPanel({ txs }: { txs: Transaction[] }) {
     return () => clearInterval(id);
   }, []);
 
-  return (
-    <Panel title="10 תרומות אחרונות" icon="💳" accentBorder="border-cyan-500/20">
-      <div className="flex flex-col gap-2">
-        {txs.map((tx, i) => (
-          <div
-            key={tx.id}
-            className="flex items-center gap-3 rounded-xl bg-white/[0.04] px-4 py-3 ring-1 ring-white/10"
-            style={{ opacity: Math.max(0.35, 1 - i * 0.065) }}
-          >
-            <span className="h-2 w-2 shrink-0 rounded-full bg-cyan-400 shadow-sm shadow-cyan-400/50" />
-            <div className="min-w-0 flex-1">
-              {/* Collector name is always the primary, bold text */}
-              <p className="truncate text-sm font-semibold text-white">
-                {tx.targetName || "תלמיד לא ידוע"}
-              </p>
-              {/* Dedication is secondary — smaller and dimmer */}
-              {tx.dedication ? (
-                <p className="truncate text-xs text-white/50">{tx.dedication}</p>
-              ) : null}
-              <p className="text-xs text-white/30">{timeAgoHe(tx.date)}</p>
-            </div>
-            <p className="shrink-0 text-sm font-bold tabular-nums text-cyan-400">
-              {nis(tx.amount)}
-            </p>
+  // Build a boy lookup map for the 90% check.
+  const boyMap = useMemo(() => {
+    const m = new Map<string, Boy>();
+    for (const b of boys) m.set(b.id, b);
+    return m;
+  }, [boys]);
+
+  // Scale scroll speed to content: 4 s per row, minimum 20 s.
+  const duration = `${Math.max(20, txs.length * 4)}s`;
+
+  // Render a single transaction row. Extracted to avoid JSX duplication.
+  function TxRow({ tx, i, dupKey }: { tx: Transaction; i: number; dupKey?: string }) {
+    const boy  = boyMap.get(tx.targetId);
+    const is90 = boy != null && pct(boy.totalRaised, boy.goal) >= 90;
+    const bp   = boy ? pct(boy.totalRaised, boy.goal) : 0;
+    const z    = boy ? Z[getZone(bp)] : null;
+    return (
+      <div
+        key={dupKey ?? tx.id}
+        className={`relative flex items-start gap-3 border-b border-white/5 px-4 py-4 ${z ? z.dim : ""}`}
+      >
+        {/* target90 badge — absolute behind all text, z-0 */}
+        {is90 && (
+          <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden">
+            <img
+              src="/assets/target90.gif"
+              alt=""
+              aria-hidden
+              className="absolute right-3 top-1/2 h-6 w-6 -translate-y-1/2 object-contain opacity-40"
+            />
           </div>
-        ))}
-        {txs.length === 0 && (
-          <p className="py-8 text-center text-sm text-white/30">אין תרומות עדיין</p>
+        )}
+        <span className="relative z-10 mt-1.5 h-2 w-2 shrink-0 rounded-full bg-cyan-400 shadow-sm shadow-cyan-400/50" />
+        <div className="relative z-10 min-w-0 flex-1">
+          <p className="truncate text-sm font-bold text-white">
+            {tx.targetName || "תלמיד לא ידוע"}
+          </p>
+          {tx.dedication ? (
+            <p className="truncate text-xs text-white/50">{tx.dedication}</p>
+          ) : null}
+          {boy && (
+            <>
+              <p className={`text-xs tabular-nums ${z ? z.text : "text-white/40"}`}>
+                גייס {nis(boy.totalRaised)} · יעד {nis(boy.goal)}
+              </p>
+              <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-white/10">
+                <div
+                  className={`h-full rounded-full transition-all duration-700 ${z ? z.bar : "bg-white/20"}`}
+                  style={{ width: `${bp}%` }}
+                />
+              </div>
+            </>
+          )}
+          <p className="text-xs text-white/30">{timeAgoHe(tx.date)}</p>
+        </div>
+        <div className="relative z-10 shrink-0 text-left">
+          <p className="text-sm font-bold tabular-nums text-cyan-400">
+            {nis(tx.amount)}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl bg-gray-900/80 ring-1 ring-white/10">
+      {/* Header */}
+      <div className="flex shrink-0 items-center gap-2 border-b border-cyan-500/20 px-5 py-3">
+        <span className="leading-none">💳</span>
+        <h2 className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/40">
+          מתרימים אחרונים
+        </h2>
+      </div>
+
+      {/* Scrolling area */}
+      <div className="relative min-h-0 flex-1 overflow-hidden">
+        {txs.length === 0 ? (
+          <div className="flex h-full items-center justify-center">
+            <p className="text-sm text-white/30">אין תרומות עדיין</p>
+          </div>
+        ) : (
+          /*
+           * List is duplicated so translateY(-50%) loops seamlessly.
+           * animationDuration inline style overrides the default from .marquee-up.
+           */
+          <div className="marquee-up" style={{ animationDuration: duration }}>
+            {/* First copy */}
+            {txs.map((tx, i) => (
+              <TxRow key={tx.id} tx={tx} i={i} />
+            ))}
+            {/* Second copy — seamless continuation */}
+            {txs.map((tx, i) => (
+              <TxRow key={`dup-${tx.id}`} tx={tx} i={i} dupKey={`dup-${tx.id}`} />
+            ))}
+          </div>
         )}
       </div>
-    </Panel>
+    </div>
   );
 }
 
 // ─── Left Column — Top Half: System Announcements ────────────────────────────────
 
-function AnnouncementsPanel({ className = "" }: { className?: string }) {
+function AnnouncementsPanel({
+  announcements,
+  className = "",
+}: {
+  announcements: Announcement[];
+  className?: string;
+}) {
+  // Scale duration with content: 15 s per announcement, min 20 s.
+  const duration = `${Math.max(20, announcements.length * 15)}s`;
+
   return (
     <div
       className={`flex flex-col overflow-hidden rounded-2xl bg-gray-900/80 ring-1 ring-white/10 ${className}`}
     >
-      {/* Header — mirrors Panel's header style */}
+      {/* Header */}
       <div className="flex shrink-0 items-center gap-2 border-b border-amber-500/20 px-5 py-3">
         <span className="leading-none">📡</span>
         <h2 className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/40">
@@ -471,40 +672,38 @@ function AnnouncementsPanel({ className = "" }: { className?: string }) {
         </h2>
       </div>
 
-      {/* Scrolling area — overflow-hidden clips the marquee track */}
+      {/* Scrolling area */}
       <div className="relative min-h-0 flex-1 overflow-hidden">
-        {/*
-         * List is duplicated so translateY(-50%) loops seamlessly:
-         * when the first copy exits the top, the second copy is in the
-         * exact starting position. Uses .marquee-up-slow (60 s) so
-         * announcements scroll noticeably slower than the in-field list.
-         */}
-        <div className="marquee-up-slow">
-          {/* First copy */}
-          {ANNOUNCEMENTS.map((a) => (
-            <div key={a.id} className="border-b border-amber-500/10 p-4">
-              <div className="flex items-start gap-3">
-                <span className="mt-0.5 shrink-0 text-xl leading-none">{a.icon}</span>
-                <div className="min-w-0">
-                  <p className="text-sm leading-relaxed text-white/80">{a.text}</p>
-                  <p className="mt-1.5 text-xs text-white/30">{a.ts}</p>
+        {announcements.length === 0 ? (
+          <div className="flex h-full items-center justify-center">
+            <p className="text-sm text-white/30">אין הודעות</p>
+          </div>
+        ) : (
+          /*
+           * List is duplicated so translateY(-50%) loops seamlessly.
+           * animationDuration inline style overrides the 10 s default from .marquee-up.
+           */
+          <div className="marquee-up" style={{ animationDuration: duration }}>
+            {/* First copy */}
+            {announcements.map((a) => (
+              <div key={a.id} className="border-b border-amber-500/10 p-4">
+                <div className="flex items-start gap-3">
+                  <span className="mt-0.5 shrink-0 text-xl leading-none">{a.icon}</span>
+                  <p className="min-w-0 text-sm leading-relaxed text-white/80">{a.text}</p>
                 </div>
               </div>
-            </div>
-          ))}
-          {/* Second copy — seamless continuation */}
-          {ANNOUNCEMENTS.map((a) => (
-            <div key={`dup-${a.id}`} className="border-b border-amber-500/10 p-4">
-              <div className="flex items-start gap-3">
-                <span className="mt-0.5 shrink-0 text-xl leading-none">{a.icon}</span>
-                <div className="min-w-0">
-                  <p className="text-sm leading-relaxed text-white/80">{a.text}</p>
-                  <p className="mt-1.5 text-xs text-white/30">{a.ts}</p>
+            ))}
+            {/* Second copy — seamless continuation */}
+            {announcements.map((a) => (
+              <div key={`dup-${a.id}`} className="border-b border-amber-500/10 p-4">
+                <div className="flex items-start gap-3">
+                  <span className="mt-0.5 shrink-0 text-xl leading-none">{a.icon}</span>
+                  <p className="min-w-0 text-sm leading-relaxed text-white/80">{a.text}</p>
                 </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -525,7 +724,6 @@ function InFieldPanel({ boys, className = "" }: { boys: Boy[]; className?: strin
     <div
       className={`flex flex-col overflow-hidden rounded-2xl bg-gray-900/80 ring-1 ring-white/10 ${className}`}
     >
-      {/* Panel header — matches the style of Panel */}
       <div className="flex shrink-0 items-center gap-2 border-b border-teal-500/20 px-5 py-3">
         <span className="leading-none">🏃</span>
         <h2 className="text-[10px] font-bold uppercase tracking-[0.2em] text-white/40">
@@ -538,18 +736,12 @@ function InFieldPanel({ boys, className = "" }: { boys: Boy[]; className?: strin
         )}
       </div>
 
-      {/* Scrolling area */}
       <div className="relative min-h-0 flex-1 overflow-hidden">
         {inField.length === 0 ? (
           <div className="flex h-full items-center justify-center">
             <p className="text-sm text-white/30">אין תלמידים בשטח</p>
           </div>
         ) : (
-          /*
-           * The list is duplicated so translateY(-50%) creates a seamless loop:
-           * when the first copy scrolls fully off the top, the second copy is
-           * exactly in the first copy's starting position.
-           */
           <div className="marquee-up" style={{ animationDuration: duration }}>
             {/* First copy */}
             {inField.map((b) => (
@@ -559,7 +751,7 @@ function InFieldPanel({ boys, className = "" }: { boys: Boy[]; className?: strin
               >
                 <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-teal-400 shadow-sm shadow-teal-400/50" />
                 <span className="flex-1 text-xl font-bold text-white">{b.name}</span>
-                <span className="shrink-0 text-xs text-white/40">שיעור {b.shiur}</span>
+                <span className="shrink-0 text-xs text-white/40">{b.shiur}</span>
               </div>
             ))}
             {/* Second copy — seamless continuation */}
@@ -570,7 +762,7 @@ function InFieldPanel({ boys, className = "" }: { boys: Boy[]; className?: strin
               >
                 <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-teal-400 shadow-sm shadow-teal-400/50" />
                 <span className="flex-1 text-xl font-bold text-white">{b.name}</span>
-                <span className="shrink-0 text-xs text-white/40">שיעור {b.shiur}</span>
+                <span className="shrink-0 text-xs text-white/40">{b.shiur}</span>
               </div>
             ))}
           </div>
@@ -586,7 +778,6 @@ function Ticker({ boys, txs }: { boys: Boy[]; txs: Transaction[] }) {
   const content = useMemo(() => {
     const parts: string[] = [];
     txs.slice(0, 5).forEach((tx) => {
-      // Boy's name is the subject; dedication is appended only if present.
       const base = `💳 ${tx.targetName || "תלמיד"} התרים ${nis(tx.amount)}`;
       parts.push(tx.dedication ? `${base} — הקדשה: ${tx.dedication}` : base);
     });
@@ -597,11 +788,11 @@ function Ticker({ boys, txs }: { boys: Boy[]; txs: Transaction[] }) {
   }, [boys, txs]);
 
   if (!content) {
-    return <div className="h-10 shrink-0 border-t border-white/10 bg-gray-900/90" />;
+    return <div className="h-10 overflow-hidden border-t border-white/10 bg-gray-900/90" />;
   }
 
   return (
-    <div className="h-10 shrink-0 overflow-hidden border-t border-white/10 bg-gray-900/90">
+    <div className="h-10 overflow-hidden border-t border-white/10 bg-gray-900/90">
       <div className="flex h-full items-center">
         {/*
          * Text is duplicated so translateX(-50%) creates a seamless loop:
@@ -628,69 +819,293 @@ function FullScreenSpinner() {
 // ─── Main Export ─────────────────────────────────────────────────────────────────
 
 export function Leaderboard() {
-  const { boys, loading: bl } = useBoys();
-  const { txs,  loading: tl } = useRecentTransactions();
-  const dailyTxs              = useDailyTransactions();
+  const { boys, loading: bl }     = useBoys();
+  const { txs,  loading: tl }     = useRecentTransactions();
+  const dailyTxs                  = useDailyTransactions();
+  const { settings, loading: sl } = useSettings();
 
-  if (bl || tl) return <FullScreenSpinner />;
+  // ── Audio refs (three separate players) ──────────────────────────────────────
+  const bgMusicRef  = useRef<HTMLAudioElement>(null);
+  const sloganRef   = useRef<HTMLAudioElement>(null);
+  const applauseRef = useRef<HTMLAudioElement>(null);
+
+  // Tracks the last BG URL we loaded so we don't call .load() on every Firestore tick.
+  const lastBgUrlRef = useRef<string>("");
+
+  // ── BG music volume ─────────────────────────────────────────────────────────
+  // When slogan is playing, duck BG music to 20 % of the configured volume.
+  useEffect(() => {
+    const el = bgMusicRef.current;
+    if (!el) return;
+    const base = settings.audioVolume / 100;
+    el.volume = settings.playSlogan ? base * 0.2 : base;
+  }, [settings.audioVolume, settings.playSlogan]);
+
+  // ── BG music URL + play / pause ─────────────────────────────────────────────
+  useEffect(() => {
+    const el = bgMusicRef.current;
+    if (!el) return;
+
+    if (settings.audioUrl && settings.audioUrl !== lastBgUrlRef.current) {
+      lastBgUrlRef.current = settings.audioUrl;
+      el.src  = settings.audioUrl;
+      el.loop = true;
+      el.load();
+      if (settings.audioPlaying) el.play().catch(console.error);
+      return; // play state handled above for this URL change
+    }
+
+    if (settings.audioPlaying) {
+      el.play().catch(console.error);
+    } else {
+      el.pause();
+    }
+  }, [settings.audioUrl, settings.audioPlaying]);
+
+  // ── Slogan play / pause ─────────────────────────────────────────────────────
+  useEffect(() => {
+    const el = sloganRef.current;
+    if (!el) return;
+    if (settings.playSlogan) {
+      el.play().catch(console.error);
+    } else {
+      el.pause();
+    }
+  }, [settings.playSlogan]);
+
+  // ── GIF overlay state ────────────────────────────────────────────────────────
+  const [showDonationGif,  setShowDonationGif]  = useState(false);
+  // Set of shiur names that currently have an active coins GIF in their row.
+  const [coinsShiurNames, setCoinsShiurNames] = useState<Set<string>>(new Set());
+  // Set of boyIds that currently have an active bomb overlay (large donation).
+  const [bombBoyIds, setBombBoyIds] = useState<Set<string>>(new Set());
+
+  // Timers for auto-hiding the short-lived GIFs.
+  const donationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Per-shiur coins timers — keyed by shiur name.
+  const coinsTimerRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+
+  useEffect(() => {
+    return () => {
+      if (donationTimerRef.current) clearTimeout(donationTimerRef.current);
+      for (const t of coinsTimerRef.current.values()) clearTimeout(t);
+    };
+  }, []);
+
+  // Tracks IDs seen in the previous snapshot so we can diff for new arrivals.
+  const prevTxIdsRef    = useRef<Set<string>>(new Set());
+  // Skip triggering effects on the very first Firestore snapshot (existing data).
+  const txInitializedRef = useRef(false);
+
+  useEffect(() => {
+    if (!txInitializedRef.current) {
+      // First snapshot — initialise the baseline, do not trigger any effects.
+      txInitializedRef.current = true;
+      prevTxIdsRef.current = new Set(txs.map((t) => t.id));
+      return;
+    }
+
+    const prevIds = prevTxIdsRef.current;
+    const newTxs  = txs.filter((t) => !prevIds.has(t.id));
+    prevTxIdsRef.current = new Set(txs.map((t) => t.id));
+
+    if (newTxs.length === 0) return;
+
+    // ── Applause on any new transaction ──
+    const applauseEl = applauseRef.current;
+    if (applauseEl) {
+      applauseEl.currentTime = 0;
+      applauseEl.play().catch(console.error);
+    }
+
+    // ── Donation GIF — central, 5 s ──
+    setShowDonationGif(true);
+    if (donationTimerRef.current) clearTimeout(donationTimerRef.current);
+    donationTimerRef.current = setTimeout(() => setShowDonationGif(false), 5_000);
+
+    // ── Coins GIF — inside the specific Shiur row, 5 s ──
+    for (const tx of newTxs) {
+      const shiur = boys.find((b) => b.id === tx.targetId)?.shiur;
+      if (!shiur) continue;
+      setCoinsShiurNames((prev) => new Set([...prev, shiur]));
+      const existing = coinsTimerRef.current.get(shiur);
+      if (existing) clearTimeout(existing);
+      const t = setTimeout(() => {
+        setCoinsShiurNames((prev) => {
+          const next = new Set(prev);
+          next.delete(shiur);
+          return next;
+        });
+        coinsTimerRef.current.delete(shiur);
+      }, 5_000);
+      coinsTimerRef.current.set(shiur, t);
+    }
+
+    // ── Bomb GIF — over daily star card, 30 s per large donation ──
+    for (const tx of newTxs) {
+      if (tx.amount > 50) {
+        const boyId = tx.targetId;
+        setBombBoyIds((prev) => new Set([...prev, boyId]));
+        setTimeout(() => {
+          setBombBoyIds((prev) => {
+            const next = new Set(prev);
+            next.delete(boyId);
+            return next;
+          });
+        }, 30_000);
+      }
+    }
+  }, [txs]);
+
+  // ── Render ───────────────────────────────────────────────────────────────────
 
   return (
     <>
-      <style>{`
-        @keyframes ticker-scroll {
-          from { transform: translateX(0); }
-          to   { transform: translateX(-50%); }
-        }
-        .ticker-track {
-          animation: ticker-scroll 50s linear infinite;
-        }
+      {/*
+       * All three <audio> elements are rendered unconditionally — before any
+       * conditional returns — so their refs are always populated when effects fire.
+       *
+       * bgMusicRef  — remote URL from Firestore (settings.audioUrl)
+       * sloganRef   — local asset, toggled via settings.playSlogan
+       * applauseRef — local asset, triggered on each new transaction
+       */}
+      <audio ref={bgMusicRef}  loop preload="none" />
+      <audio ref={sloganRef}   src="/assets/slogan.mp3"   loop preload="none" />
+      <audio ref={applauseRef} src="/assets/applause.mp3"      preload="none" />
 
-        @keyframes marquee-up {
-          from { transform: translateY(0); }
-          to   { transform: translateY(-50%); }
-        }
-        .marquee-up {
-          animation: marquee-up 10s linear infinite;
-          will-change: transform;
-        }
-        .marquee-up-slow {
-          animation: marquee-up 60s linear infinite;
-          will-change: transform;
-        }
+      {(bl || tl || sl) ? <FullScreenSpinner /> : (
+        <>
+          <style>{`
+            @keyframes ticker-scroll {
+              from { transform: translateX(0); }
+              to   { transform: translateX(-50%); }
+            }
+            .ticker-track {
+              animation: ticker-scroll 50s linear infinite;
+            }
 
-        .no-scrollbar::-webkit-scrollbar { display: none; }
-        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-      `}</style>
+            @keyframes marquee-up {
+              from { transform: translateY(0); }
+              to   { transform: translateY(-50%); }
+            }
+            /*
+             * Base duration is 10 s — overridden per panel via inline
+             * animationDuration style.
+             */
+            .marquee-up {
+              animation: marquee-up 10s linear infinite;
+              will-change: transform;
+            }
 
-      <div className="flex h-screen flex-col overflow-hidden bg-gray-950" dir="rtl">
+            @keyframes gif-pop {
+              0%   { opacity: 0; transform: scale(0.7); }
+              15%  { opacity: 1; transform: scale(1.05); }
+              85%  { opacity: 1; transform: scale(1); }
+              100% { opacity: 0; transform: scale(0.9); }
+            }
+            .gif-pop {
+              animation: gif-pop linear forwards;
+            }
 
-        {/* ── Header (3 cards, fixed 200 px tall) ── */}
-        <div className="grid h-[200px] shrink-0 grid-cols-[1fr_1.1fr_1fr] gap-4 p-4">
-          <CampaignNameCard />
-          <DailyStarCard boys={boys} dailyTxs={dailyTxs} />
-          <CampaignTotalCard boys={boys} />
-        </div>
+            .no-scrollbar::-webkit-scrollbar { display: none; }
+            .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+          `}</style>
 
-        {/* ── Body (3 columns, fills remaining space) ── */}
-        <div className="grid min-h-0 flex-1 grid-cols-3 gap-4 px-4 pb-4">
-          <ShiurPanel boys={boys} />
-          <TransactionsPanel txs={txs} />
+          <div className="relative flex h-screen flex-col overflow-hidden bg-gray-950" dir="rtl">
 
-          {/*
-           * Left column: two equal halves stacked vertically.
-           * flex-1 min-h-0 on each child ensures they share the column height equally
-           * and their overflow-hidden clipping works correctly.
-           */}
-          <div className="flex min-h-0 flex-col gap-4">
-            <AnnouncementsPanel className="flex-1 min-h-0" />
-            <InFieldPanel boys={boys} className="flex-1 min-h-0" />
+
+            <div className="relative z-[1] grid min-h-[280px] shrink-0 grid-cols-[1fr_2fr_1fr] gap-4 p-4">
+              <CampaignNameCard name={settings.campaignName} />
+              {/* Middle slot: DailyStarCard (50%) + LegendCard (50%) */}
+              <div className="grid grid-cols-2 gap-4">
+                <DailyStarCard
+                  boys={boys}
+                  dailyTxs={dailyTxs}
+                  hasBomb={bombBoyIds.size > 0}
+                />
+                <LegendCard />
+              </div>
+              <CampaignTotalCard boys={boys} globalGoal={settings.globalGoal} />
+            </div>
+
+            {/* ── Body (3 columns, fills remaining space) ── */}
+            <div className="relative z-[1] grid min-h-0 flex-1 grid-cols-[1fr_2fr_1fr] gap-4 px-4 pb-4">
+              <ShiurPanel boys={boys} coinsShiurNames={coinsShiurNames} />
+              {/* Center: branding label + recent donors panel */}
+              <div className="flex min-h-0 flex-col gap-1.5">
+                <p className="shrink-0 text-center text-[10px] font-medium tracking-widest text-white/20 whitespace-nowrap">
+                  קותיס מערכות תקשורת
+                </p>
+                <TransactionsPanel txs={txs} boys={boys} />
+              </div>
+
+              {/*
+               * Left column: announcements (top) + in-field marquee (bottom),
+               * each taking exactly half the column height.
+               */}
+              <div className="flex min-h-0 flex-col gap-4">
+                <AnnouncementsPanel
+                  announcements={settings.announcements}
+                  className="flex-1 min-h-0"
+                />
+                <InFieldPanel boys={boys} className="flex-1 min-h-0" />
+              </div>
+            </div>
+
+            {/* ── Footer: ticker + audio unlock button ── */}
+            <div className="relative shrink-0">
+              <Ticker boys={boys} txs={txs} />
+              {/*
+               * Audio unlock button — browsers block autoplay until the user
+               * interacts with the page. Clicking this unlocks the audio context
+               * so all subsequent remote play commands work without a gesture.
+               */}
+              <button
+                type="button"
+                onClick={() => {
+                  bgMusicRef.current?.play().catch(console.error);
+                  if (settings.playSlogan) sloganRef.current?.play().catch(console.error);
+                }}
+                className="
+                  absolute bottom-0 right-2 top-0
+                  flex items-center rounded px-2
+                  text-base text-white/20 transition-colors
+                  hover:text-white/60
+                "
+                title="לחץ להפעלת אודיו"
+                aria-label="הפעל אודיו"
+              >
+                🔊
+              </button>
+            </div>
+
+            {/* ══ Event-driven GIF overlays ══════════════════════════════════════
+             *
+             * All overlays use pointer-events-none so they never block clicks.
+             * They are positioned with `fixed` so they sit above the layout
+             * regardless of scroll or grid placement.
+             */}
+
+            {/* Donation GIF — full-screen overlay, 5 s, z-50 above everything */}
+            {showDonationGif && (
+              <div
+                className="pointer-events-none fixed left-0 top-0 z-50 h-screen w-screen"
+                aria-hidden
+              >
+                <img
+                  src="/assets/donation.gif"
+                  alt=""
+                  className="gif-pop h-full w-full object-cover"
+                  style={{ animationDuration: "5s" }}
+                />
+              </div>
+            )}
+
+            {/* coins.gif is now rendered inside ShiurPanel per-row — no global overlay */}
+
           </div>
-        </div>
-
-        {/* ── Footer ticker ── */}
-        <Ticker boys={boys} txs={txs} />
-
-      </div>
+        </>
+      )}
     </>
   );
 }

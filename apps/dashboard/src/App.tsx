@@ -5,6 +5,7 @@ import { DashboardLayout } from "./layouts/DashboardLayout";
 import { DashboardHomePage } from "./pages/DashboardHomePage";
 import { BoysPage } from "./pages/BoysPage";
 import { FoldersPage } from "./pages/FoldersPage";
+import { SettingsPage } from "./pages/SettingsPage";
 import { TransactionsPage } from "./pages/TransactionsPage";
 import { LoginPage } from "./pages/LoginPage";
 
@@ -18,6 +19,7 @@ import { LoginPage } from "./pages/LoginPage";
  *      /field            →     FoldersPage          (field & folders management with SIP dialer)
  *      /transactions     →     TransactionsPage     (manual donations + transaction history)
  *      /workers          →     BoysPage             (collectors / boys management)
+ *      /settings         →     SettingsPage         (control room — TV showcase settings)
  */
 export default function App() {
   return (
@@ -34,6 +36,7 @@ export default function App() {
               <Route path="field" element={<FoldersPage />} />
               <Route path="transactions" element={<TransactionsPage />} />
               <Route path="workers" element={<BoysPage />} />
+              <Route path="settings" element={<SettingsPage />} />
             </Route>
           </Route>
         </Routes>
