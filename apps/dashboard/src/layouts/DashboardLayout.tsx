@@ -12,7 +12,7 @@ const ROLE_LABELS: Record<string, string> = {
 
 // ─── Nav link style ───────────────────────────────────────────────────────────
 //
-// Active:   left-side rose/pink accent bar + rose-tinted gradient background.
+// Active:   left-side cyan accent bar + cyan-tinted gradient background.
 //           The sidebar is physically on the right; the bar faces the content.
 // Inactive: dim slate text that brightens cleanly on hover.
 
@@ -21,8 +21,8 @@ function navLinkClass({ isActive }: { isActive: boolean }) {
     "flex items-center gap-3 rounded-r-xl px-3 py-2.5 text-sm font-semibold " +
     "transition-all duration-150 border-l-[3px]";
   return isActive
-    ? `${base} bg-gradient-to-r from-rose-500/20 via-fuchsia-500/5 to-transparent border-l-rose-400 text-white`
-    : `${base} border-l-transparent text-slate-400 hover:bg-slate-800/70 hover:text-white`;
+    ? `${base} bg-gradient-to-r from-cyan-500/20 via-cyan-400/5 to-transparent border-l-cyan-400 text-white`
+    : `${base} border-l-transparent text-slate-400 hover:bg-slate-800/60 hover:text-white`;
 }
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
@@ -95,14 +95,14 @@ export function DashboardLayout() {
           {/* Brand — right side in RTL */}
           <div className="flex items-center gap-3">
             {/* Logo mark with multi-color gradient */}
-            <div className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-rose-500 via-fuchsia-500 to-indigo-600 shadow-[0_0_18px_rgba(244,63,94,0.5)]">
+            <div className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-400 via-lime-400 to-orange-500 shadow-[0_0_18px_rgba(34,211,238,0.6)]">
               <svg className="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24"
                 stroke="currentColor" strokeWidth={1.75} aria-hidden="true">
                 <path strokeLinecap="round" strokeLinejoin="round"
                   d="M12 3l2.5 5H20l-4.5 4 1.7 5.5L12 14.5 6.8 17.5 8.5 12 4 8h5.5L12 3z" />
               </svg>
             </div>
-            <span className="text-base font-extrabold tracking-tight bg-gradient-to-l from-rose-400 via-fuchsia-400 to-indigo-400 bg-clip-text text-transparent">
+            <span className="text-base font-extrabold tracking-tight bg-gradient-to-l from-orange-400 via-lime-400 to-cyan-400 bg-clip-text text-transparent">
               פלטפורמת פורים
             </span>
           </div>
@@ -112,14 +112,14 @@ export function DashboardLayout() {
 
             {/* User pill */}
             <div className="hidden sm:flex items-center gap-2.5 rounded-full bg-slate-800/90 border border-slate-700 py-1.5 px-3">
-              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-rose-500 to-fuchsia-600 text-white text-xs font-bold">
+              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-cyan-500 to-pink-600 text-white text-xs font-bold">
                 {user?.displayName?.charAt(0).toUpperCase() ?? "?"}
               </div>
               <div className="text-right leading-tight">
                 <p className="text-sm font-semibold text-white whitespace-nowrap">
                   {user?.displayName}
                 </p>
-                <p className="text-[11px] text-rose-400 font-medium">
+                <p className="text-[11px] text-cyan-400 font-medium">
                   {ROLE_LABELS[user?.role ?? ""] ?? user?.role}
                 </p>
               </div>
@@ -129,10 +129,10 @@ export function DashboardLayout() {
             <button
               onClick={() => void signOut()}
               className="
-                flex items-center gap-2 rounded-lg border border-rose-500/40 bg-transparent
-                px-3 py-2 text-sm font-semibold text-rose-400
-                transition-all hover:bg-rose-500/15 hover:border-rose-400/70
-                focus:outline-none focus:ring-2 focus:ring-rose-500/50 focus:ring-offset-2 focus:ring-offset-slate-950
+                flex items-center gap-2 rounded-lg border border-cyan-500/40 bg-transparent
+                px-3 py-2 text-sm font-semibold text-cyan-400
+                transition-all hover:bg-cyan-500/15 hover:border-cyan-400/70
+                focus:outline-none focus:ring-2 focus:ring-cyan-500/50 focus:ring-offset-2 focus:ring-offset-slate-950
               "
               title="יציאה מהמערכת"
             >
@@ -147,7 +147,7 @@ export function DashboardLayout() {
         </div>
 
         {/* Multi-color gradient bottom border — the visual "power line" */}
-        <div className="h-[2px] shrink-0 bg-gradient-to-r from-rose-500 via-fuchsia-500 via-violet-500 to-indigo-500" />
+        <div className="h-[2px] shrink-0 bg-gradient-to-r from-cyan-500 via-lime-400 via-orange-400 to-pink-500" />
       </header>
 
       {/* ── Body: sidebar + main ──────────────────────────────────────────── */}
@@ -157,7 +157,7 @@ export function DashboardLayout() {
         <aside className="fixed top-[66px] right-0 bottom-0 z-10 w-64 flex flex-col bg-slate-900 border-l border-slate-800">
 
           {/* Top gradient accent stripe */}
-          <div className="h-[3px] shrink-0 bg-gradient-to-r from-rose-500 via-fuchsia-500 to-indigo-500" />
+          <div className="h-[3px] shrink-0 bg-gradient-to-r from-cyan-500 via-lime-400 to-orange-500" />
 
           {/* Welcome block */}
           <div className="px-4 pt-5 pb-4 border-b border-slate-800/80">
@@ -182,7 +182,7 @@ export function DashboardLayout() {
                   <IconHome active={isActive} />
                   <span>לוח בקרה</span>
                   {isActive && (
-                    <span className="mr-auto inline-flex items-center justify-center h-1.5 w-1.5 rounded-full bg-rose-400 shadow-[0_0_8px_rgba(244,63,94,0.9)]" />
+                    <span className="mr-auto inline-flex items-center justify-center h-1.5 w-1.5 rounded-full bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.9)]" />
                   )}
                 </>
               )}
@@ -194,7 +194,7 @@ export function DashboardLayout() {
                   <IconUsers active={isActive} />
                   <span>ניהול מתרימים</span>
                   {isActive && (
-                    <span className="mr-auto inline-flex h-1.5 w-1.5 rounded-full bg-rose-400 shadow-[0_0_8px_rgba(244,63,94,0.9)]" />
+                    <span className="mr-auto inline-flex h-1.5 w-1.5 rounded-full bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.9)]" />
                   )}
                 </>
               )}
@@ -206,7 +206,7 @@ export function DashboardLayout() {
                   <IconFolder active={isActive} />
                   <span>ניהול שטח</span>
                   {isActive && (
-                    <span className="mr-auto inline-flex h-1.5 w-1.5 rounded-full bg-rose-400 shadow-[0_0_8px_rgba(244,63,94,0.9)]" />
+                    <span className="mr-auto inline-flex h-1.5 w-1.5 rounded-full bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.9)]" />
                   )}
                 </>
               )}
@@ -218,7 +218,7 @@ export function DashboardLayout() {
                   <IconReceipt active={isActive} />
                   <span>תרומות ועסקאות</span>
                   {isActive && (
-                    <span className="mr-auto inline-flex h-1.5 w-1.5 rounded-full bg-rose-400 shadow-[0_0_8px_rgba(244,63,94,0.9)]" />
+                    <span className="mr-auto inline-flex h-1.5 w-1.5 rounded-full bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.9)]" />
                   )}
                 </>
               )}
@@ -230,7 +230,7 @@ export function DashboardLayout() {
                   <IconSettings active={isActive} />
                   <span>חדר בקרה</span>
                   {isActive && (
-                    <span className="mr-auto inline-flex h-1.5 w-1.5 rounded-full bg-rose-400 shadow-[0_0_8px_rgba(244,63,94,0.9)]" />
+                    <span className="mr-auto inline-flex h-1.5 w-1.5 rounded-full bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.9)]" />
                   )}
                 </>
               )}
@@ -240,7 +240,7 @@ export function DashboardLayout() {
 
           {/* Sidebar footer */}
           <div className="p-4 border-t border-slate-800/80">
-            <div className="h-px mb-3 bg-gradient-to-l from-rose-500/40 via-fuchsia-500/20 to-transparent" />
+            <div className="h-px mb-3 bg-gradient-to-l from-cyan-500/40 via-lime-500/20 to-transparent" />
             <p className="text-center text-[10px] font-medium tracking-widest text-slate-600 uppercase">
               קוטיס · {new Date().getFullYear()}
             </p>

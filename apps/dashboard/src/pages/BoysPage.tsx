@@ -21,6 +21,8 @@ interface BoyDoc {
   totalRaised: number;
   status: "in_field" | "finished" | "not_out";
   folderId?: string;
+  nedarimName?: string;
+  donorNumber?: string;
 }
 
 type StatusKey = "in_field" | "finished" | "not_out";
@@ -30,6 +32,8 @@ interface FormState {
   shiur: string;
   goal: string;        // string for controlled input; parsed to number on save
   status: StatusKey;
+  nedarimName: string;
+  donorNumber: string;
 }
 
 // ─── Constants ─────────────────────────────────────────────────────────────────
@@ -42,16 +46,18 @@ const STATUS_LABELS: Record<string, string> = {
 
 // Full class strings so Tailwind never purges them.
 const STATUS_BADGE_CLS: Record<StatusKey, string> = {
-  in_field: "bg-green-50  text-green-700  ring-green-600/20",
-  finished: "bg-gray-100  text-gray-600   ring-gray-500/20",
-  not_out:  "bg-yellow-50 text-yellow-700 ring-yellow-600/20",
+  in_field: "bg-lime-500/10  text-lime-400  ring-lime-400/30",
+  finished: "bg-slate-700/50 text-slate-400 ring-slate-500/30",
+  not_out:  "bg-orange-500/10 text-orange-400 ring-orange-400/30",
 };
 
 const EMPTY_FORM: FormState = {
-  name:   "",
-  shiur:  "",
-  goal:   "500",
-  status: "not_out",
+  name:        "",
+  shiur:       "",
+  goal:        "500",
+  status:      "not_out",
+  nedarimName: "",
+  donorNumber: "",
 };
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
@@ -73,18 +79,18 @@ function progressPct(raised: number, goal: number): string {
 // ─── Shared field styles (match TransactionsPage exactly) ──────────────────────
 
 const fieldCls =
-  "w-full rounded-lg border border-gray-300 px-3 py-2 text-sm text-gray-800 " +
-  "placeholder-gray-400 focus:border-indigo-500 focus:outline-none " +
-  "focus:ring-1 focus:ring-indigo-500 bg-white";
+  "w-full rounded-lg border border-slate-700 px-3 py-2 text-sm text-slate-100 " +
+  "placeholder-slate-500 focus:border-cyan-500 focus:outline-none " +
+  "focus:ring-1 focus:ring-cyan-500 bg-slate-800/80";
 
-const labelCls = "text-xs font-medium text-gray-600";
+const labelCls = "text-xs font-medium text-slate-400";
 
 // ─── Status badge ──────────────────────────────────────────────────────────────
 
 function StatusBadge({ status }: { status: string }) {
   const cls =
     STATUS_BADGE_CLS[status as StatusKey] ??
-    "bg-gray-100 text-gray-500 ring-gray-400/20";
+    "bg-slate-700/50 text-slate-400 ring-slate-500/30";
   return (
     <span
       className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset ${cls}`}
@@ -106,7 +112,7 @@ interface ModalProps {
 function BoyModal({ mode, boy, onClose, onSaved }: ModalProps) {
   const [form, setForm] = useState<FormState>(
     boy
-      ? { name: boy.name, shiur: boy.shiur, goal: String(boy.goal), status: boy.status }
+      ? { name: boy.name, shiur: boy.shiur, goal: String(boy.goal), status: boy.status, nedarimName: boy.nedarimName ?? "", donorNumber: boy.donorNumber ?? "" }
       : EMPTY_FORM,
   );
   const [saving, setSaving] = useState(false);
@@ -149,6 +155,8 @@ function BoyModal({ mode, boy, onClose, onSaved }: ModalProps) {
           goal,
           totalRaised: 0,
           status: form.status,
+          nedarimName: form.nedarimName.trim(),
+          donorNumber: form.donorNumber.trim(),
         });
         onSaved(`${name} נוסף בהצלחה`);
       } else {
@@ -158,6 +166,8 @@ function BoyModal({ mode, boy, onClose, onSaved }: ModalProps) {
           shiur,
           goal,
           status: form.status,
+          nedarimName: form.nedarimName.trim(),
+          donorNumber: form.donorNumber.trim(),
         });
         onSaved(`${name} עודכן בהצלחה`);
       }
@@ -173,20 +183,20 @@ function BoyModal({ mode, boy, onClose, onSaved }: ModalProps) {
   return (
     // Backdrop — click-outside closes the modal
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div className="w-full max-w-md rounded-2xl bg-white shadow-xl">
+      <div className="w-full max-w-md rounded-2xl bg-slate-900 border border-slate-700/50 shadow-2xl shadow-black/60">
 
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
-          <h2 className="text-base font-semibold text-gray-800">
+        <div className="flex items-center justify-between border-b border-slate-700/60 px-6 py-4">
+          <h2 className="text-base font-semibold text-white">
             {mode === "add" ? "הוספת מתרים חדש" : `עריכת ${boy!.name}`}
           </h2>
           <button
             type="button"
             onClick={onClose}
-            className="rounded-lg p-1.5 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600"
+            className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-slate-800 hover:text-slate-200"
             aria-label="סגור"
           >
             <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -202,7 +212,7 @@ function BoyModal({ mode, boy, onClose, onSaved }: ModalProps) {
             {/* Name */}
             <div className="flex flex-col gap-1">
               <label htmlFor="boy-name" className={labelCls}>
-                שם <span className="text-red-500">*</span>
+                שם <span className="text-pink-500">*</span>
               </label>
               <input
                 ref={nameRef}
@@ -218,22 +228,28 @@ function BoyModal({ mode, boy, onClose, onSaved }: ModalProps) {
             {/* Shiur */}
             <div className="flex flex-col gap-1">
               <label htmlFor="boy-shiur" className={labelCls}>
-                שיעור <span className="text-red-500">*</span>
+                שיעור <span className="text-pink-500">*</span>
               </label>
-              <input
+              <select
                 id="boy-shiur"
-                type="text"
-                placeholder="א, ב, ג..."
                 value={form.shiur}
                 onChange={field("shiur")}
                 className={fieldCls}
-              />
+              >
+                <option value="">בחר שיעור...</option>
+                <option value="שיעור א'">שיעור א'</option>
+                <option value="שיעור ב'">שיעור ב'</option>
+                <option value="שיעור ג'">שיעור ג'</option>
+                <option value="קיבוץ נמוך">קיבוץ נמוך</option>
+                <option value="קיבוץ גבוה">קיבוץ גבוה</option>
+                <option value="תרומה כללית">תרומה כללית</option>
+              </select>
             </div>
 
             {/* Goal */}
             <div className="flex flex-col gap-1">
               <label htmlFor="boy-goal" className={labelCls}>
-                יעד גיוס (₪) <span className="text-red-500">*</span>
+                יעד גיוס (₪) <span className="text-pink-500">*</span>
               </label>
               <input
                 id="boy-goal"
@@ -263,21 +279,47 @@ function BoyModal({ mode, boy, onClose, onSaved }: ModalProps) {
               </select>
             </div>
 
+            {/* Nedarim Name */}
+            <div className="flex flex-col gap-1">
+              <label htmlFor="boy-nedarim" className={labelCls}>שם נדרים</label>
+              <input
+                id="boy-nedarim"
+                type="text"
+                placeholder="שם כפי שמופיע בנדרים"
+                value={form.nedarimName}
+                onChange={field("nedarimName")}
+                className={fieldCls}
+              />
+            </div>
+
+            {/* Donor Number */}
+            <div className="flex flex-col gap-1">
+              <label htmlFor="boy-donor-num" className={labelCls}>מספר מתרים</label>
+              <input
+                id="boy-donor-num"
+                type="text"
+                placeholder="מספר מתרים במערכת"
+                value={form.donorNumber}
+                onChange={field("donorNumber")}
+                className={fieldCls}
+              />
+            </div>
+
             {/* totalRaised — read-only, edit mode only */}
             {mode === "edit" && boy && (
               <div className="flex flex-col gap-1">
                 <label className={labelCls}>
                   סה&quot;כ נתרם
-                  <span className="mr-1.5 rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-normal text-gray-400">
+                  <span className="mr-1.5 rounded bg-slate-700 px-1.5 py-0.5 text-[10px] font-normal text-slate-400">
                     קריאה בלבד
                   </span>
                 </label>
                 <div
-                  className="w-full cursor-not-allowed rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-500"
+                  className="w-full cursor-not-allowed rounded-lg border border-slate-700 bg-slate-800/40 px-3 py-2 text-sm text-slate-400"
                   aria-readonly="true"
                 >
                   {formatCurrency(boy.totalRaised)}
-                  <span className="mr-2 text-xs text-gray-400">
+                  <span className="mr-2 text-xs text-slate-500">
                     ({progressPct(boy.totalRaised, boy.goal)}% מהיעד)
                   </span>
                 </div>
@@ -288,17 +330,17 @@ function BoyModal({ mode, boy, onClose, onSaved }: ModalProps) {
 
           {/* Validation error */}
           {error && (
-            <div className="mx-6 mb-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">
+            <div className="mx-6 mb-2 rounded-lg bg-red-950/50 border border-red-500/30 px-3 py-2 text-sm text-red-400">
               {error}
             </div>
           )}
 
           {/* Footer */}
-          <div className="flex justify-end gap-3 border-t border-gray-100 px-6 py-4">
+          <div className="flex justify-end gap-3 border-t border-slate-700/60 px-6 py-4">
             <button
               type="button"
               onClick={onClose}
-              className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-50"
+              className="rounded-lg border border-slate-600 bg-transparent px-4 py-2 text-sm font-medium text-slate-400 transition-colors hover:bg-slate-800 hover:text-white"
             >
               ביטול
             </button>
@@ -306,10 +348,10 @@ function BoyModal({ mode, boy, onClose, onSaved }: ModalProps) {
               type="submit"
               disabled={saving}
               className="
-                rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm
-                transition-colors hover:bg-indigo-500
+                rounded-lg bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 shadow-sm
+                transition-colors hover:bg-cyan-400
                 disabled:cursor-not-allowed disabled:opacity-50
-                focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1
+                focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-offset-1 focus:ring-offset-slate-900
               "
             >
               {saving ? "שומר..." : mode === "add" ? "הוסף" : "שמור שינויים"}
@@ -326,9 +368,9 @@ function BoyModal({ mode, boy, onClose, onSaved }: ModalProps) {
 
 function EmptyState({ onAdd }: { onAdd: () => void }) {
   return (
-    <div className="rounded-xl border border-dashed border-gray-300 bg-white px-6 py-16 text-center">
+    <div className="rounded-xl border border-dashed border-slate-700 bg-slate-900/50 px-6 py-16 text-center">
       <svg
-        className="mx-auto h-10 w-10 text-gray-300"
+        className="mx-auto h-10 w-10 text-slate-600"
         fill="none"
         viewBox="0 0 24 24"
         stroke="currentColor"
@@ -341,14 +383,14 @@ function EmptyState({ onAdd }: { onAdd: () => void }) {
           d="M15.75 6a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0zM4.501 20.118a7.5 7.5 0 0114.998 0A17.933 17.933 0 0112 21.75c-2.676 0-5.216-.584-7.499-1.632z"
         />
       </svg>
-      <p className="mt-3 text-sm font-medium text-gray-500">אין מתרימים במערכת עדיין</p>
-      <p className="mt-1 text-xs text-gray-400">לחץ על "הוסף מתרים" כדי להתחיל</p>
+      <p className="mt-3 text-sm font-medium text-slate-400">אין מתרימים במערכת עדיין</p>
+      <p className="mt-1 text-xs text-slate-500">לחץ על "הוסף מתרים" כדי להתחיל</p>
       <button
         type="button"
         onClick={onAdd}
         className="
-          mt-4 inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2
-          text-sm font-semibold text-white shadow-sm transition-colors hover:bg-indigo-500
+          mt-4 inline-flex items-center gap-2 rounded-lg bg-cyan-500 px-4 py-2
+          text-sm font-semibold text-slate-950 shadow-sm transition-colors hover:bg-cyan-400
         "
       >
         <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -426,19 +468,19 @@ export function BoysPage() {
       {/* Page heading */}
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">ניהול מתרימים</h1>
-          <p className="mt-1 text-sm text-gray-500">
+          <h1 className="text-2xl font-bold text-white">ניהול מתרימים</h1>
+          <p className="mt-1 text-sm text-slate-400">
             הוספה, עריכה ומחיקה של מתרימים ·{" "}
-            <span className="font-medium text-gray-700">{boys.length}</span> מתרימים במערכת
+            <span className="font-medium text-cyan-400">{boys.length}</span> מתרימים במערכת
           </p>
         </div>
         <button
           type="button"
           onClick={openAdd}
           className="
-            flex shrink-0 items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5
-            text-sm font-semibold text-white shadow-sm transition-colors hover:bg-indigo-500
-            focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1
+            flex shrink-0 items-center gap-2 rounded-lg bg-cyan-500 px-4 py-2.5
+            text-sm font-semibold text-slate-950 shadow-sm transition-colors hover:bg-cyan-400
+            focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-offset-1 focus:ring-offset-slate-950
           "
         >
           <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -450,7 +492,7 @@ export function BoysPage() {
 
       {/* Success toast */}
       {successMsg && (
-        <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm font-medium text-green-700">
+        <div className="rounded-lg border border-lime-500/30 bg-lime-500/10 px-4 py-3 text-sm font-medium text-lime-400">
           ✓ {successMsg}
         </div>
       )}
@@ -458,7 +500,7 @@ export function BoysPage() {
       {/* Loading */}
       {loading ? (
         <div className="flex items-center justify-center py-20">
-          <div className="h-8 w-8 animate-spin rounded-full border-4 border-indigo-600 border-t-transparent" />
+          <div className="h-8 w-8 animate-spin rounded-full border-4 border-cyan-500 border-t-transparent" />
         </div>
 
       /* Empty state */
@@ -467,22 +509,22 @@ export function BoysPage() {
 
       /* Data table */
       ) : (
-        <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
+        <div className="overflow-hidden rounded-xl border border-slate-700/50 bg-slate-900/50 shadow-sm shadow-black/30 backdrop-blur-sm">
           <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200">
-              <thead className="bg-gray-50">
+            <table className="min-w-full divide-y divide-slate-800/50">
+              <thead className="bg-slate-800/50">
                 <tr>
                   {["שם", "שיעור", "יעד גיוס", 'סה"כ נתרם', "סטטוס", "פעולות"].map((h) => (
                     <th
                       key={h}
-                      className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500"
+                      className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500"
                     >
                       {h}
                     </th>
                   ))}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <tbody className="divide-y divide-slate-800/50">
                 {boys.map((boy) => {
                   const isConfirming = pendingDeleteId === boy.id;
                   const isDeleting   = deletingId === boy.id;
@@ -491,31 +533,31 @@ export function BoysPage() {
                       key={boy.id}
                       className={`transition-colors ${
                         isConfirming
-                          ? "bg-red-50"
-                          : "bg-white hover:bg-gray-50/50"
+                          ? "bg-red-950/30"
+                          : "bg-transparent hover:bg-slate-800/30"
                       }`}
                     >
                       {/* Name */}
-                      <td className="px-4 py-3 text-sm font-semibold text-gray-800">
+                      <td className="px-4 py-3 text-sm font-semibold text-white">
                         {boy.name}
                       </td>
 
                       {/* Shiur */}
-                      <td className="px-4 py-3 text-sm text-gray-600">
+                      <td className="px-4 py-3 text-sm text-slate-300">
                         {boy.shiur}
                       </td>
 
                       {/* Goal */}
-                      <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-600">
+                      <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-300">
                         {formatCurrency(boy.goal)}
                       </td>
 
                       {/* Total raised — visually distinguished as read-only data */}
                       <td className="whitespace-nowrap px-4 py-3">
-                        <span className="text-sm font-medium text-gray-800">
+                        <span className="text-sm font-medium text-white">
                           {formatCurrency(boy.totalRaised)}
                         </span>
-                        <span className="mr-1.5 text-[11px] text-gray-400">
+                        <span className="mr-1.5 text-[11px] text-slate-500">
                           ({progressPct(boy.totalRaised, boy.goal)}%)
                         </span>
                       </td>
@@ -530,7 +572,7 @@ export function BoysPage() {
                         {isConfirming ? (
                           // Inline delete confirmation — stays on the same row
                           <div className="flex items-center gap-2">
-                            <span className="text-xs font-medium text-red-600 whitespace-nowrap">
+                            <span className="text-xs font-medium text-red-400 whitespace-nowrap">
                               האם למחוק?
                             </span>
                             <button
@@ -538,8 +580,8 @@ export function BoysPage() {
                               onClick={() => void handleDelete(boy)}
                               disabled={isDeleting}
                               className="
-                                rounded-md bg-red-600 px-2.5 py-1 text-xs font-semibold text-white
-                                transition-colors hover:bg-red-500 disabled:opacity-50
+                                rounded-md bg-red-500 px-2.5 py-1 text-xs font-semibold text-white
+                                transition-colors hover:bg-red-400 disabled:opacity-50
                               "
                             >
                               {isDeleting ? "מוחק..." : "כן, מחק"}
@@ -548,8 +590,8 @@ export function BoysPage() {
                               type="button"
                               onClick={() => setPendingDeleteId(null)}
                               className="
-                                rounded-md border border-gray-200 bg-white px-2.5 py-1
-                                text-xs font-medium text-gray-600 transition-colors hover:bg-gray-50
+                                rounded-md border border-slate-600 bg-transparent px-2.5 py-1
+                                text-xs font-medium text-slate-400 transition-colors hover:bg-slate-800
                               "
                             >
                               ביטול
@@ -561,10 +603,10 @@ export function BoysPage() {
                               type="button"
                               onClick={() => openEdit(boy)}
                               className="
-                                rounded-lg border border-gray-200 bg-white px-3 py-1.5
-                                text-xs font-medium text-gray-600 transition-colors
-                                hover:bg-gray-50 hover:text-gray-900
-                                focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1
+                                rounded-lg border border-slate-600 bg-transparent px-3 py-1.5
+                                text-xs font-medium text-slate-400 transition-colors
+                                hover:bg-slate-700 hover:text-white
+                                focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-offset-1 focus:ring-offset-slate-950
                               "
                             >
                               עריכה
@@ -573,10 +615,10 @@ export function BoysPage() {
                               type="button"
                               onClick={() => setPendingDeleteId(boy.id)}
                               className="
-                                rounded-lg border border-red-200 bg-white px-3 py-1.5
-                                text-xs font-medium text-red-600 transition-colors
-                                hover:bg-red-50
-                                focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-1
+                                rounded-lg border border-red-500/40 bg-transparent px-3 py-1.5
+                                text-xs font-medium text-red-400 transition-colors
+                                hover:bg-red-950/40 hover:border-red-400/60
+                                focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-1 focus:ring-offset-slate-950
                               "
                             >
                               מחיקה
