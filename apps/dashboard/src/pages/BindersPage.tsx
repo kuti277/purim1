@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   addDoc,
   collection,
@@ -10,7 +10,9 @@ import {
   serverTimestamp,
   Timestamp,
   updateDoc,
+  writeBatch,
 } from "firebase/firestore";
+import * as XLSX from "xlsx";
 import { clientDb } from "../lib/firebase";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -98,6 +100,51 @@ function matchesSearch(b: BinderRow, q: string): boolean {
     b.buildingNum, b.phone, b.cellphone, b.city,
     b.relation, b.notes,
   ].some((f) => (f ?? "").toLowerCase().includes(lower));
+}
+
+// ─── Import / Export helpers ───────────────────────────────────────────────────
+
+function exportBindersCsv(binders: BinderRow[]) {
+  const BOM = "\uFEFF";
+  const headers = ["אזור", "שם פרטי", "שם משפחה", "רחוב", "מס׳ בניין", "טלפון", "נייד", "עיר", "קשר", "הערות", "סטטוס"];
+  const rows = binders.map((b) => [
+    b.region, b.firstName, b.lastName, b.street, b.buildingNum,
+    b.phone, b.cellphone, b.city, b.relation, b.notes,
+    STATUS_CONFIG[b.status]?.label ?? b.status,
+  ]);
+  const csv = [headers, ...rows]
+    .map((r) => r.map((c) => `"${String(c ?? "").replace(/"/g, '""')}"`).join(","))
+    .join("\r\n");
+  const blob = new Blob([BOM + csv], { type: "text/csv;charset=utf-8;" });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement("a");
+  a.href = url; a.download = "binders.csv"; a.click();
+  URL.revokeObjectURL(url);
+}
+
+async function parseBinderRows(file: File): Promise<BinderFormData[]> {
+  const buf  = await file.arrayBuffer();
+  const wb   = XLSX.read(buf);
+  const ws   = wb.Sheets[wb.SheetNames[0]];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rows = XLSX.utils.sheet_to_json<any>(ws, { defval: "" });
+  const statusMap: Record<string, BinderStatus> = {
+    "נאסף": "collected", "באיסוף": "collecting", "לא נאסף": "not_collected",
+    "collected": "collected", "collecting": "collecting", "not_collected": "not_collected",
+  };
+  return rows.map((r) => ({
+    region:      String(r["אזור"]       ?? r["region"]      ?? "").trim(),
+    firstName:   String(r["שם פרטי"]    ?? r["firstName"]   ?? "").trim(),
+    lastName:    String(r["שם משפחה"]   ?? r["lastName"]    ?? "").trim(),
+    street:      String(r["רחוב"]       ?? r["street"]      ?? "").trim(),
+    buildingNum: String(r["מס׳ בניין"]  ?? r["buildingNum"] ?? "").trim(),
+    phone:       String(r["טלפון"]      ?? r["phone"]       ?? "").trim(),
+    cellphone:   String(r["נייד"]       ?? r["cellphone"]   ?? "").trim(),
+    city:        String(r["עיר"]        ?? r["city"]        ?? "").trim(),
+    relation:    String(r["קשר"]        ?? r["relation"]    ?? "").trim(),
+    notes:       String(r["הערות"]      ?? r["notes"]       ?? "").trim(),
+    status:      statusMap[String(r["סטטוס"] ?? r["status"] ?? "").trim()] ?? "not_collected",
+  } as BinderFormData)).filter((r) => r.firstName || r.lastName);
 }
 
 // ─── Binder form modal ─────────────────────────────────────────────────────────
@@ -392,6 +439,11 @@ export function BindersPage() {
   const [search, setSearch]           = useState("");
   const [filterStatus, setFilterStatus] = useState<BinderStatus | "">("");
 
+  // Import state
+  const [importing, setImporting] = useState(false);
+  const [importMsg, setImportMsg] = useState<string | null>(null);
+  const importRef = useRef<HTMLInputElement>(null);
+
   // ── Firestore real-time listener ─────────────────────────────────────────
   useEffect(() => {
     const q = query(
@@ -470,6 +522,43 @@ export function BindersPage() {
     });
   }
 
+  async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setImporting(true);
+    setImportMsg(null);
+    try {
+      const rows = await parseBinderRows(file);
+      if (!rows.length) {
+        setImporting(false);
+        setImportMsg("לא נמצאו שורות תקינות בקובץ");
+        setTimeout(() => setImportMsg(null), 4000);
+        return;
+      }
+      const CHUNK = 499;
+      for (let i = 0; i < rows.length; i += CHUNK) {
+        const batch = writeBatch(clientDb);
+        rows.slice(i, i + CHUNK).forEach((row) => {
+          batch.set(doc(collection(clientDb, "binders")), {
+            ...row,
+            createdAt: serverTimestamp(),
+            statusUpdatedAt: serverTimestamp(),
+          });
+        });
+        await batch.commit();
+      }
+      setImportMsg(`✓ יובאו ${rows.length} קלסרים בהצלחה`);
+      setTimeout(() => setImportMsg(null), 4000);
+    } catch (err) {
+      console.error("[BindersPage] import error:", err);
+      setImportMsg("שגיאה בייבוא — בדוק את פורמט הקובץ");
+      setTimeout(() => setImportMsg(null), 4000);
+    } finally {
+      setImporting(false);
+    }
+  }
+
   // ── Render ────────────────────────────────────────────────────────────────
 
   return (
@@ -491,27 +580,83 @@ export function BindersPage() {
           </p>
         </div>
 
-        <button
-          type="button"
-          onClick={() => setAddOpen(true)}
-          className="
-            group relative flex items-center gap-2.5 overflow-hidden
-            rounded-xl px-5 py-3 text-sm font-black text-white
-            bg-gradient-to-r from-cyan-500 to-sky-500
-            shadow-[0_4px_20px_rgba(6,182,212,0.45)]
-            hover:from-cyan-400 hover:to-sky-400
-            hover:shadow-[0_6px_30px_rgba(6,182,212,0.65)]
-            transition-all duration-200
-            focus:outline-none focus:ring-2 focus:ring-cyan-500/60 focus:ring-offset-2 focus:ring-offset-slate-950
-          "
-        >
-          <span className="pointer-events-none absolute inset-0 translate-x-full group-hover:translate-x-[-200%] transition-transform duration-700 bg-gradient-to-l from-transparent via-white/15 to-transparent skew-x-12" />
-          <svg className="relative h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-          </svg>
-          <span className="relative">הוסף קלסר</span>
-        </button>
+        <div className="flex items-center gap-2.5">
+          {/* Export */}
+          <button
+            type="button"
+            onClick={() => exportBindersCsv(binders)}
+            disabled={binders.length === 0}
+            className="flex items-center gap-1.5 rounded-xl border border-lime-500/40 bg-transparent px-4 py-2.5 text-xs font-bold text-lime-400 transition-colors hover:bg-lime-500/10 hover:border-lime-400/60 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+            </svg>
+            ייצוא CSV
+          </button>
+
+          {/* Import */}
+          <button
+            type="button"
+            onClick={() => importRef.current?.click()}
+            disabled={importing}
+            className="flex items-center gap-1.5 rounded-xl border border-orange-500/40 bg-transparent px-4 py-2.5 text-xs font-bold text-orange-400 transition-colors hover:bg-orange-500/10 hover:border-orange-400/60 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {importing ? (
+              <svg className="h-3.5 w-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth={4} />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+            ) : (
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+              </svg>
+            )}
+            {importing ? "מייבא..." : "ייבוא Excel/CSV"}
+          </button>
+          <input
+            ref={importRef}
+            type="file"
+            accept=".csv,.xlsx,.xls"
+            className="hidden"
+            onChange={(e) => void handleImport(e)}
+          />
+
+          {/* Add */}
+          <button
+            type="button"
+            onClick={() => setAddOpen(true)}
+            className="
+              group relative flex items-center gap-2.5 overflow-hidden
+              rounded-xl px-5 py-3 text-sm font-black text-white
+              bg-gradient-to-r from-cyan-500 to-sky-500
+              shadow-[0_4px_20px_rgba(6,182,212,0.45)]
+              hover:from-cyan-400 hover:to-sky-400
+              hover:shadow-[0_6px_30px_rgba(6,182,212,0.65)]
+              transition-all duration-200
+              focus:outline-none focus:ring-2 focus:ring-cyan-500/60 focus:ring-offset-2 focus:ring-offset-slate-950
+            "
+          >
+            <span className="pointer-events-none absolute inset-0 translate-x-full group-hover:translate-x-[-200%] transition-transform duration-700 bg-gradient-to-l from-transparent via-white/15 to-transparent skew-x-12" />
+            <svg className="relative h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+            </svg>
+            <span className="relative">הוסף קלסר</span>
+          </button>
+        </div>
       </div>
+
+      {/* Import result banner */}
+      {importMsg && (
+        <div
+          className={`rounded-xl px-4 py-3 text-sm font-medium ${
+            importMsg.startsWith("✓")
+              ? "border border-lime-500/30 bg-lime-500/10 text-lime-400"
+              : "border border-red-500/30 bg-red-500/10 text-red-400"
+          }`}
+        >
+          {importMsg}
+        </div>
+      )}
 
       {/* Search + filter bar */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">

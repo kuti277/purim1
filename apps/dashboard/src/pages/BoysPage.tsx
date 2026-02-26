@@ -8,7 +8,9 @@ import {
   orderBy,
   query,
   updateDoc,
+  writeBatch,
 } from "firebase/firestore";
+import * as XLSX from "xlsx";
 import { clientDb } from "../lib/firebase";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -74,6 +76,43 @@ function formatCurrency(n: number): string {
 function progressPct(raised: number, goal: number): string {
   if (goal <= 0) return "0";
   return ((raised / goal) * 100).toFixed(0);
+}
+
+// ─── Import / Export helpers ───────────────────────────────────────────────────
+
+function exportBoysCsv(boys: BoyDoc[]) {
+  const BOM = "\uFEFF";
+  const headers = ["שם", "שיעור", "יעד גיוס", 'סה"כ נתרם', "סטטוס", "שם נדרים", "מספר מתרים"];
+  const rows = boys.map((b) => [
+    b.name, b.shiur, b.goal, b.totalRaised,
+    STATUS_LABELS[b.status] ?? b.status,
+    b.nedarimName ?? "", b.donorNumber ?? "",
+  ]);
+  const csv = [headers, ...rows]
+    .map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(","))
+    .join("\r\n");
+  const blob = new Blob([BOM + csv], { type: "text/csv;charset=utf-8;" });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement("a");
+  a.href = url; a.download = "boys.csv"; a.click();
+  URL.revokeObjectURL(url);
+}
+
+async function parseBoyRows(file: File) {
+  const buf  = await file.arrayBuffer();
+  const wb   = XLSX.read(buf);
+  const ws   = wb.Sheets[wb.SheetNames[0]];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rows = XLSX.utils.sheet_to_json<any>(ws, { defval: "" });
+  return rows.map((r) => ({
+    name:        String(r["שם"]          ?? r["name"]        ?? "").trim(),
+    shiur:       String(r["שיעור"]       ?? r["shiur"]       ?? "").trim(),
+    goal:        parseInt(String(r["יעד גיוס"] ?? r["goal"] ?? "500"), 10) || 500,
+    totalRaised: 0,
+    status:      "not_out" as const,
+    nedarimName: String(r["שם נדרים"]    ?? r["nedarimName"] ?? "").trim(),
+    donorNumber: String(r["מספר מתרים"]  ?? r["donorNumber"] ?? "").trim(),
+  })).filter((r) => r.name);
 }
 
 // ─── Shared field styles (match TransactionsPage exactly) ──────────────────────
@@ -418,6 +457,10 @@ export function BoysPage() {
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const successTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Import state
+  const [importing, setImporting] = useState(false);
+  const importRef = useRef<HTMLInputElement>(null);
+
   function showSuccess(msg: string) {
     setSuccessMsg(msg);
     if (successTimer.current) clearTimeout(successTimer.current);
@@ -461,6 +504,31 @@ export function BoysPage() {
   function openAdd() { setModal({ mode: "add", boy: null }); }
   function openEdit(boy: BoyDoc) { setModal({ mode: "edit", boy }); }
 
+  async function handleImport(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setImporting(true);
+    try {
+      const rows = await parseBoyRows(file);
+      if (!rows.length) { setImporting(false); showSuccess("לא נמצאו שורות תקינות בקובץ"); return; }
+      const CHUNK = 499;
+      for (let i = 0; i < rows.length; i += CHUNK) {
+        const batch = writeBatch(clientDb);
+        rows.slice(i, i + CHUNK).forEach((row) => {
+          batch.set(doc(collection(clientDb, "boys")), row);
+        });
+        await batch.commit();
+      }
+      showSuccess(`יובאו ${rows.length} מתרימים בהצלחה`);
+    } catch (err) {
+      console.error("[BoysPage] import error:", err);
+      showSuccess("שגיאה בייבוא — בדוק את פורמט הקובץ");
+    } finally {
+      setImporting(false);
+    }
+  }
+
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
     <div className="space-y-6">
@@ -474,20 +542,63 @@ export function BoysPage() {
             <span className="font-medium text-cyan-400">{boys.length}</span> מתרימים במערכת
           </p>
         </div>
-        <button
-          type="button"
-          onClick={openAdd}
-          className="
-            flex shrink-0 items-center gap-2 rounded-lg bg-cyan-500 px-4 py-2.5
-            text-sm font-semibold text-slate-950 shadow-sm transition-colors hover:bg-cyan-400
-            focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-offset-1 focus:ring-offset-slate-950
-          "
-        >
-          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
-          </svg>
-          הוסף מתרים
-        </button>
+        <div className="flex shrink-0 items-center gap-2">
+          {/* Export */}
+          <button
+            type="button"
+            onClick={() => exportBoysCsv(boys)}
+            disabled={boys.length === 0}
+            className="flex items-center gap-1.5 rounded-lg border border-lime-500/40 bg-transparent px-3 py-2.5 text-xs font-semibold text-lime-400 transition-colors hover:bg-lime-500/10 hover:border-lime-400/60 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+            </svg>
+            ייצוא CSV
+          </button>
+
+          {/* Import */}
+          <button
+            type="button"
+            onClick={() => importRef.current?.click()}
+            disabled={importing}
+            className="flex items-center gap-1.5 rounded-lg border border-orange-500/40 bg-transparent px-3 py-2.5 text-xs font-semibold text-orange-400 transition-colors hover:bg-orange-500/10 hover:border-orange-400/60 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {importing ? (
+              <svg className="h-3.5 w-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth={4} />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+            ) : (
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5" />
+              </svg>
+            )}
+            {importing ? "מייבא..." : "ייבוא Excel/CSV"}
+          </button>
+          <input
+            ref={importRef}
+            type="file"
+            accept=".csv,.xlsx,.xls"
+            className="hidden"
+            onChange={(e) => void handleImport(e)}
+          />
+
+          {/* Add */}
+          <button
+            type="button"
+            onClick={openAdd}
+            className="
+              flex shrink-0 items-center gap-2 rounded-lg bg-cyan-500 px-4 py-2.5
+              text-sm font-semibold text-slate-950 shadow-sm transition-colors hover:bg-cyan-400
+              focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:ring-offset-1 focus:ring-offset-slate-950
+            "
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+            </svg>
+            הוסף מתרים
+          </button>
+        </div>
       </div>
 
       {/* Success toast */}
