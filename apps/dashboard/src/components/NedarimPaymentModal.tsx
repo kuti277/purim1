@@ -80,6 +80,10 @@ export function NedarimPaymentModal({
   const [clientName, setClientName] = useState("");
   const [comment, setComment]       = useState("");
   const [boyId, setBoyId]           = useState("");
+  // Combobox search state (decoupled from boyId so typing doesn't clear selection)
+  const [boySearch, setBoySearch]   = useState("");
+  const [comboOpen, setComboOpen]   = useState(false);
+  const comboRef = useRef<HTMLDivElement>(null);
 
   // ── API credentials (loaded once per open) ────────────────────────────────
   const [mosad, setMosad]       = useState("");
@@ -98,6 +102,14 @@ export function NedarimPaymentModal({
   const selectedBoy = boys.find((b) => b.id === boyId) ?? null;
   const resolvedParam1 = selectedBoy?.nedarimName?.trim() || selectedBoy?.name?.trim() || "";
 
+  // Filtered list for the combobox (empty query → show all)
+  const filteredBoys = boySearch.trim()
+    ? boys.filter((b) =>
+        b.name.toLowerCase().includes(boySearch.trim().toLowerCase()) ||
+        (b.nedarimName ?? "").toLowerCase().includes(boySearch.trim().toLowerCase())
+      )
+    : boys;
+
   // ── Load API credentials on open ─────────────────────────────────────────
   useEffect(() => {
     if (!open) return;
@@ -112,6 +124,17 @@ export function NedarimPaymentModal({
       .catch((err) => console.error("[NedarimModal] load creds:", err));
     return () => { cancelled = true; };
   }, [open]);
+
+  // ── Close combobox on outside click ──────────────────────────────────────
+  useEffect(() => {
+    function onOutside(e: MouseEvent) {
+      if (comboRef.current && !comboRef.current.contains(e.target as Node)) {
+        setComboOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", onOutside);
+    return () => document.removeEventListener("mousedown", onOutside);
+  }, []);
 
   // ── Receive postMessage from Nedarim iframe ────────────────────────────────
   useEffect(() => {
@@ -181,6 +204,7 @@ export function NedarimPaymentModal({
   function handleClose() {
     if (paying) return;
     setAmount(""); setClientName(""); setComment(""); setBoyId("");
+    setBoySearch(""); setComboOpen(false);
     setError(null); setSuccess(false); setPaying(false);
     onClose();
   }
@@ -337,26 +361,92 @@ export function NedarimPaymentModal({
               />
             </div>
 
-            {/* Boy dropdown */}
-            <div>
-              <label htmlFor="nd-boy" className={LBL}>
-                גבאי (Param1)
+            {/* Boy combobox — searchable */}
+            <div ref={comboRef} className="relative">
+              <label htmlFor="nd-boy-search" className={LBL}>
+                בחר מתרים / יעד (הקלד לחיפוש)
               </label>
-              <select
-                id="nd-boy"
-                value={boyId}
-                onChange={(e) => setBoyId(e.target.value)}
-                className={INP}
-                disabled={paying}
-              >
-                <option value="">— כללי —</option>
-                {boys.map((b) => (
-                  <option key={b.id} value={b.id}>
-                    {b.name}
-                  </option>
-                ))}
-              </select>
-              {/* Live preview of the Param1 value that will be transmitted */}
+              <div className="relative">
+                <input
+                  id="nd-boy-search"
+                  type="text"
+                  autoComplete="off"
+                  placeholder="הקלד שם לחיפוש..."
+                  value={boySearch}
+                  disabled={paying}
+                  onFocus={() => setComboOpen(true)}
+                  onChange={(e) => {
+                    setBoySearch(e.target.value);
+                    setBoyId("");          // clear selection while typing
+                    setComboOpen(true);
+                  }}
+                  className={INP + (boyId ? " ring-1 ring-cyan-500/50 border-cyan-500/50" : "")}
+                />
+                {/* Clear button — shown when a boy is selected */}
+                {boyId && !paying && (
+                  <button
+                    type="button"
+                    onClick={() => { setBoyId(""); setBoySearch(""); setComboOpen(true); }}
+                    className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors"
+                    tabIndex={-1}
+                  >
+                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                )}
+              </div>
+
+              {/* Dropdown list */}
+              {comboOpen && !paying && (
+                <ul className="absolute z-20 mt-1 max-h-52 w-full overflow-y-auto rounded-xl border border-slate-700 bg-slate-900 py-1 shadow-2xl">
+                  {/* "כללי" (clear) option */}
+                  <li>
+                    <button
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => { setBoyId(""); setBoySearch(""); setComboOpen(false); }}
+                      className="flex w-full items-center gap-2 px-3 py-2 text-sm text-slate-400 hover:bg-slate-800 transition-colors"
+                    >
+                      <span className="text-slate-600">—</span> כללי
+                    </button>
+                  </li>
+
+                  {filteredBoys.length === 0 ? (
+                    <li className="px-3 py-3 text-center text-xs text-slate-600">
+                      לא נמצאו תוצאות
+                    </li>
+                  ) : (
+                    filteredBoys.map((b) => (
+                      <li key={b.id}>
+                        <button
+                          type="button"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => {
+                            setBoyId(b.id);
+                            setBoySearch(b.name);
+                            setComboOpen(false);
+                          }}
+                          className={`flex w-full items-center justify-between px-3 py-2 text-sm transition-colors hover:bg-slate-800 ${
+                            b.id === boyId
+                              ? "bg-cyan-500/10 text-cyan-300"
+                              : "text-white"
+                          }`}
+                        >
+                          <span>{b.name}</span>
+                          {b.nedarimName && b.nedarimName !== b.name && (
+                            <span className="font-mono text-[10px] text-slate-500">
+                              {b.nedarimName}
+                            </span>
+                          )}
+                        </button>
+                      </li>
+                    ))
+                  )}
+                </ul>
+              )}
+
+              {/* Live Param1 preview */}
               {selectedBoy && (
                 <p className="mt-1.5 flex items-center gap-1.5 text-[10px] text-slate-500">
                   <span className="font-bold uppercase tracking-widest">Param1 →</span>
