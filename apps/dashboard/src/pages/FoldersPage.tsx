@@ -67,6 +67,8 @@ function FieldPageContent() {
   const [selected, setSelected]         = useState<BinderDoc | null>(null);
   const [binderSearch, setBinderSearch] = useState("");
   const [addBoyId, setAddBoyId]         = useState("");
+  const [shiftPhone, setShiftPhone]     = useState("");
+  const [noPhone, setNoPhone]           = useState(false);
   const [releasing, setReleasing]       = useState(false);
 
   // ── Firestore listeners ──────────────────────────────────────────────────────
@@ -130,12 +132,27 @@ function FieldPageContent() {
 
   async function addBoy() {
     if (!selected || !addBoyId) return;
-    await updateDoc(doc(clientDb, "boys", addBoyId), { folderId: selected.id });
+    const phone = noPhone ? "" : shiftPhone.trim();
+    await updateDoc(doc(clientDb, "boys", addBoyId), {
+      folderId: selected.id,
+      shiftPhone: phone,
+    });
     setAddBoyId("");
+    setShiftPhone("");
+    setNoPhone(false);
   }
 
   async function removeBoy(boyId: string) {
-    await updateDoc(doc(clientDb, "boys", boyId), { folderId: "", status: "not_out" });
+    const remaining = assignedBoys.filter((b) => b.id !== boyId);
+    const batch = writeBatch(clientDb);
+    batch.update(doc(clientDb, "boys", boyId), { folderId: "", status: "not_out" });
+    if (remaining.length === 0 && selected) {
+      batch.update(doc(clientDb, "binders", selected.id), {
+        status: "not_collected",
+        statusUpdatedAt: serverTimestamp(),
+      });
+    }
+    await batch.commit();
   }
 
   async function releaseToField() {
@@ -231,7 +248,7 @@ function FieldPageContent() {
                     <button
                       key={binder.id}
                       type="button"
-                      onClick={() => { setSelected(binder); setAddBoyId(""); }}
+                      onClick={() => { setSelected(binder); setAddBoyId(""); setShiftPhone(""); setNoPhone(false); }}
                       className={`
                         w-full rounded-xl border px-4 py-3 text-right transition-all duration-150
                         ${isSelected
@@ -398,6 +415,37 @@ function FieldPageContent() {
                       </svg>
                     </button>
                   </div>
+                  {/* Shift phone input */}
+                  {addBoyId && (
+                    <div className="mt-2.5 space-y-1.5">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="tel"
+                          dir="ltr"
+                          placeholder="טלפון משמרת (לדוגמה: 050-0000000)"
+                          value={shiftPhone}
+                          disabled={noPhone}
+                          onChange={(e) => setShiftPhone(e.target.value)}
+                          className="
+                            flex-1 rounded-lg border border-slate-700 bg-slate-800/80
+                            px-3 py-2 text-sm text-slate-100 placeholder-slate-600
+                            focus:border-cyan-500 focus:outline-none focus:ring-1 focus:ring-cyan-500
+                            disabled:opacity-40 disabled:cursor-not-allowed
+                          "
+                        />
+                        <label className="flex items-center gap-1.5 cursor-pointer select-none shrink-0">
+                          <input
+                            type="checkbox"
+                            className="h-3.5 w-3.5 rounded accent-orange-400"
+                            checked={noPhone}
+                            onChange={(e) => { setNoPhone(e.target.checked); if (e.target.checked) setShiftPhone(""); }}
+                          />
+                          <span className="text-xs text-slate-400">אין טלפון</span>
+                        </label>
+                      </div>
+                    </div>
+                  )}
+
                   {availableBoys.length === 0 && (
                     <p className="mt-1.5 text-xs text-slate-600">
                       כל המתרימים כבר משויכים לקלסרים

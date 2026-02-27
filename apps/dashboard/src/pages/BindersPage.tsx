@@ -68,7 +68,7 @@ export const STATUS_CONFIG: Record<
 
 // ─── Shared style constants ─────────────────────────────────────────────────────
 
-const EMPTY_FORM: BinderFormData = {
+export const EMPTY_FORM: BinderFormData = {
   region: "",
   firstName: "",
   lastName: "",
@@ -147,9 +147,99 @@ async function parseBinderRows(file: File): Promise<BinderFormData[]> {
   } as BinderFormData)).filter((r) => r.firstName || r.lastName);
 }
 
+// ─── Print / PDF helpers ───────────────────────────────────────────────────────
+
+const STATUS_LABELS_HE: Record<BinderStatus, string> = {
+  collected: "נאסף",
+  collecting: "באיסוף",
+  not_collected: "לא נאסף",
+};
+
+function openBinderPrintWindow(b: BinderRow, mode: "print" | "pdf") {
+  const fullName    = [b.firstName, b.lastName].filter(Boolean).join(" ") || "קלסר";
+  const address     = [b.street, b.buildingNum].filter(Boolean).join(" ") || "—";
+  const statusLabel = STATUS_LABELS_HE[b.status] ?? b.status;
+  const badgeClass  = `badge-${b.status}`;
+  const date        = new Date().toLocaleDateString("he-IL", { day: "2-digit", month: "2-digit", year: "numeric" });
+  const binderNum   = (b as BinderRow & { binderNumber?: string }).binderNumber;
+  // Pre-compute PDF title assignment so it never nests inside the template literal
+  const titleScript = mode === "pdf" ? "document.title = " + JSON.stringify(fullName) + ";" : "";
+
+  const html = `<!DOCTYPE html>
+<html dir="rtl" lang="he">
+<head>
+  <meta charset="UTF-8">
+  <title>${fullName}</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:'Segoe UI',Arial,sans-serif;direction:rtl;background:#fff;color:#111;padding:2cm}
+    @page{size:A4;margin:1.5cm}
+    .hdr{display:flex;align-items:flex-start;justify-content:space-between;border-bottom:3px solid #0891b2;padding-bottom:14px;margin-bottom:22px}
+    .hdr-left h1{font-size:24px;font-weight:900;color:#0f172a}
+    .hdr-left .sub{font-size:12px;color:#64748b;margin-top:5px}
+    .badge{display:inline-block;padding:3px 12px;border-radius:999px;font-size:11px;font-weight:700;margin-top:8px}
+    .badge-collected{background:#dcfce7;color:#166534}
+    .badge-collecting{background:#fff7ed;color:#9a3412}
+    .badge-not_collected{background:#fef2f2;color:#991b1b}
+    .binder-num{font-size:32px;font-weight:900;color:#0891b2;line-height:1}
+    .binder-num-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#94a3b8;margin-top:4px;text-align:center}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:18px}
+    .field label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#94a3b8;display:block;margin-bottom:4px}
+    .field p{font-size:14px;color:#0f172a;font-weight:500}
+    .field p.empty{color:#cbd5e1;font-weight:400}
+    hr{border:none;border-top:1px solid #e2e8f0;margin:18px 0}
+    .notes-label{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#94a3b8;margin-bottom:8px}
+    .notes-box{background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:14px;font-size:13px;color:#334155;min-height:64px;white-space:pre-wrap;line-height:1.6}
+    .footer{margin-top:28px;border-top:1px solid #e2e8f0;padding-top:12px;font-size:10px;color:#94a3b8;display:flex;justify-content:space-between}
+  </style>
+</head>
+<body>
+  <div class="hdr">
+    <div class="hdr-left">
+      <h1>${fullName}</h1>
+      <div class="sub">${b.region ? `אזור: ${b.region}` : ""}${b.region && b.city ? " · " : ""}${b.city || ""}</div>
+      <span class="badge ${badgeClass}">${statusLabel}</span>
+    </div>
+    ${binderNum ? `<div style="text-align:center"><div class="binder-num">${binderNum}</div><div class="binder-num-label">מס׳ קלסר</div></div>` : ""}
+  </div>
+
+  <div class="grid">
+    <div class="field"><label>כתובת</label><p>${address === "—" ? `<span class="empty">—</span>` : address}</p></div>
+    <div class="field"><label>עיר</label><p>${b.city || `<span class="empty">—</span>`}</p></div>
+    <div class="field"><label>טלפון</label><p dir="ltr">${b.phone || `<span class="empty">—</span>`}</p></div>
+    <div class="field"><label>נייד</label><p dir="ltr">${b.cellphone || `<span class="empty">—</span>`}</p></div>
+    <div class="field"><label>אזור</label><p>${b.region || `<span class="empty">—</span>`}</p></div>
+    <div class="field"><label>קשר / חיבור</label><p>${b.relation || `<span class="empty">—</span>`}</p></div>
+  </div>
+
+  <hr>
+  <div class="notes-label">הערות</div>
+  <div class="notes-box">${b.notes ? b.notes.replace(/</g, "&lt;") : '<span style="color:#cbd5e1">אין הערות</span>'}</div>
+
+  <div class="footer">
+    <span>הודפס: ${date}</span>
+    <span>${mode === "pdf" ? "PDF — " : ""}מערכת ניהול קמפיין</span>
+  </div>
+
+  <script>
+    window.onload = function() {
+      ${titleScript}
+      window.print();
+      setTimeout(function(){ window.close(); }, 1000);
+    };
+  </script>
+</body>
+</html>`;
+
+  const win = window.open("", "_blank", "width=820,height=1060");
+  if (!win) return;
+  win.document.write(html);
+  win.document.close();
+}
+
 // ─── Binder form modal ─────────────────────────────────────────────────────────
 
-function BinderModal({
+export function BinderModal({
   title,
   initial,
   onSave,
@@ -828,6 +918,30 @@ export function BindersPage() {
                       {/* Action buttons */}
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1.5">
+                          {/* Print */}
+                          <button
+                            type="button"
+                            onClick={() => openBinderPrintWindow(b, "print")}
+                            className="flex h-7 w-7 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-700/60 hover:text-slate-200 transition-colors"
+                            title="הדפסה"
+                          >
+                            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M6.72 13.829c-.24.03-.48.062-.72.096m.72-.096a42.415 42.415 0 0 1 10.56 0m-10.56 0L6.34 18m10.94-4.171c.24.03.48.062.72.096m-.72-.096L17.66 18m0 0 .229 2.523a1.125 1.125 0 0 1-1.12 1.227H7.231c-.662 0-1.18-.568-1.12-1.227L6.34 18m11.318 0h1.091A2.25 2.25 0 0 0 21 15.75V9.456c0-1.081-.768-2.015-1.837-2.175a48.055 48.055 0 0 0-1.913-.247M6.34 18H5.25A2.25 2.25 0 0 1 3 15.75V9.456c0-1.081.768-2.015 1.837-2.175a48.041 48.041 0 0 1 1.913-.247m10.5 0a48.536 48.536 0 0 0-10.5 0m10.5 0V3.375c0-.621-.504-1.125-1.125-1.125h-8.25c-.621 0-1.125.504-1.125 1.125v3.659M18 10.5h.008v.008H18V10.5Zm-3 0h.008v.008H15V10.5Z" />
+                            </svg>
+                          </button>
+
+                          {/* Download PDF */}
+                          <button
+                            type="button"
+                            onClick={() => openBinderPrintWindow(b, "pdf")}
+                            className="flex h-7 w-7 items-center justify-center rounded-lg text-slate-500 hover:bg-rose-500/15 hover:text-rose-400 transition-colors"
+                            title="הורד כ PDF"
+                          >
+                            <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m.75 12 3 3m0 0 3-3m-3 3v-6m-1.5-9H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
+                            </svg>
+                          </button>
+
                           {/* Edit */}
                           <button
                             type="button"

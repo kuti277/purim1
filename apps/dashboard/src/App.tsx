@@ -9,6 +9,7 @@ import { SettingsPage } from "./pages/SettingsPage";
 import { TransactionsPage } from "./pages/TransactionsPage";
 import { BindersPage } from "./pages/BindersPage";
 import { TickerPage } from "./pages/TickerPage";
+import { AddressBankPage } from "./pages/AddressBankPage";
 import { LoginPage } from "./pages/LoginPage";
 
 /**
@@ -39,6 +40,7 @@ export default function App() {
               <Route path="transactions" element={<TransactionsPage />} />
               <Route path="workers" element={<BoysPage />} />
               <Route path="binders" element={<BindersPage />} />
+              <Route path="address-bank" element={<AddressBankPage />} />
               <Route path="ticker" element={<TickerPage />} />
               <Route path="settings" element={<SettingsPage />} />
             </Route>

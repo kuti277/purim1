@@ -68,6 +68,7 @@ export function TickerPage() {
   const [draft, setDraft]   = useState("");
   const [saveState, setSaveState] = useState<SaveState>("idle");
   const [loadError, setLoadError] = useState(false);
+  const [showTxs, setShowTxs] = useState(true);
 
   // ── Real-time listener for the current ticker ───────────────────────────────
   useEffect(() => {
@@ -79,6 +80,7 @@ export function TickerPage() {
           const msg  = (data.message as string) ?? "";
           setLiveMessage(msg);
           setLiveUpdatedAt(data.updatedAt as Timestamp | undefined);
+          setShowTxs((data.showTransactions as boolean) ?? true);
           // Pre-fill the draft only on first load (don't clobber user edits)
           setDraft((prev) => (prev === "" ? msg : prev));
         }
@@ -92,12 +94,22 @@ export function TickerPage() {
     if (!draft.trim()) return;
     setSaveState("saving");
     try {
-      await setDoc(TICKER_DOC, { message: draft.trim(), updatedAt: serverTimestamp() });
+      await setDoc(TICKER_DOC, { message: draft.trim(), updatedAt: serverTimestamp() }, { merge: true });
       setSaveState("saved");
       setTimeout(() => setSaveState("idle"), 2500);
     } catch {
       setSaveState("error");
       setTimeout(() => setSaveState("idle"), 3000);
+    }
+  }
+
+  async function handleToggleTxs(val: boolean) {
+    setShowTxs(val);
+    try {
+      await setDoc(TICKER_DOC, { showTransactions: val }, { merge: true });
+    } catch {
+      // revert optimistic update on failure
+      setShowTxs(!val);
     }
   }
 
@@ -179,6 +191,21 @@ export function TickerPage() {
               {draft.length} תווים
             </span>
           </div>
+
+          {/* Toggle: show recent transactions */}
+          <label className="flex items-center gap-3 cursor-pointer select-none w-fit">
+            <div className="relative">
+              <input
+                type="checkbox"
+                className="sr-only"
+                checked={showTxs}
+                onChange={(e) => void handleToggleTxs(e.target.checked)}
+              />
+              <div className={`w-10 h-5 rounded-full transition-colors duration-200 ${showTxs ? "bg-cyan-500 shadow-[0_0_8px_rgba(6,182,212,0.6)]" : "bg-slate-700"}`} />
+              <div className={`absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform duration-200 ${showTxs ? "translate-x-5" : "translate-x-0"}`} />
+            </div>
+            <span className="text-sm text-slate-300 font-medium">הצג תרומות אחרונות בטיקר</span>
+          </label>
 
           {/* Feedback banner */}
           {loadError && (
@@ -264,9 +291,10 @@ export function TickerPage() {
       {/* ── Info box ── */}
       <div className="rounded-xl border border-slate-800 bg-slate-900/40 px-5 py-4 text-xs text-slate-600 leading-relaxed space-y-1">
         <p className="font-bold text-slate-500 uppercase tracking-widest text-[10px] mb-2">מידע טכני</p>
-        <p>• Firestore path: <code className="text-cyan-500/80 font-mono">settings / ticker / message</code></p>
+        <p>• Firestore path: <code className="text-cyan-500/80 font-mono">settings / ticker</code> — fields: <code className="text-cyan-500/80 font-mono">message</code>, <code className="text-cyan-500/80 font-mono">showTransactions</code></p>
         <p>• הטיקר על מסך הTV מאזין לשינויים בזמן אמת — אין צורך לרענן</p>
         <p>• הודעה ריקה לא תישמר</p>
+        <p>• מתג "הצג תרומות" נשמר מיידית ומשפיע על השידור בלי ללחוץ שמור</p>
       </div>
 
     </div>

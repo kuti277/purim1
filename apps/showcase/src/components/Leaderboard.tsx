@@ -61,10 +61,10 @@ function getZone(p: number): Zone {
 }
 
 const Z: Record<Zone, { text: string; bar: string; ring: string; glow: string; dim: string }> = {
-  red:    { text: "text-red-400",    bar: "bg-red-500",    ring: "ring-red-500/30",    glow: "shadow-red-500/20",    dim: "bg-red-500/10"    },
-  yellow: { text: "text-yellow-300", bar: "bg-yellow-400", ring: "ring-yellow-400/30", glow: "shadow-yellow-400/20", dim: "bg-yellow-400/10" },
-  orange: { text: "text-orange-400", bar: "bg-orange-500", ring: "ring-orange-500/30", glow: "shadow-orange-500/20", dim: "bg-orange-500/10" },
-  green:  { text: "text-green-400",  bar: "bg-green-400",  ring: "ring-green-500/30",  glow: "shadow-green-500/20",  dim: "bg-green-500/10"  },
+  red:    { text: "text-red-500",    bar: "bg-red-500",    ring: "ring-red-500/30",    glow: "shadow-red-500/20",    dim: "bg-red-500/10"    },
+  yellow: { text: "text-yellow-400", bar: "bg-yellow-400", ring: "ring-yellow-400/30", glow: "shadow-yellow-400/20", dim: "bg-yellow-400/10" },
+  orange: { text: "text-orange-500", bar: "bg-orange-500", ring: "ring-orange-500/30", glow: "shadow-orange-500/20", dim: "bg-orange-500/10" },
+  green:  { text: "text-green-500",  bar: "bg-green-400",  ring: "ring-green-500/30",  glow: "shadow-green-500/20",  dim: "bg-green-500/10"  },
 };
 
 // ─── Constants ──────────────────────────────────────────────────────────────────
@@ -95,7 +95,11 @@ function nis(n: number): string {
 }
 
 function pct(raised: number, goal: number): number {
-  return goal > 0 ? (raised / goal) * 100 : 0;
+  // Coerce to float first so Firestore integer types or accidental strings
+  // never cause silent integer-division or NaN before the * 100 step.
+  const r = parseFloat(String(raised)) || 0;
+  const g = parseFloat(String(goal))   || 0;
+  return g > 0 ? (r / g) * 100 : 0;
 }
 
 /**
@@ -214,7 +218,7 @@ function useSettings(): { settings: GlobalSettings; loading: boolean } {
  */
 function useTickerSettings(): { message: string; showTransactions: boolean } {
   const [message, setMessage]               = useState("");
-  const [showTransactions, setShowTxs]      = useState(true); // default: show txs
+  const [showTransactions, setShowTxs]      = useState(true);
   useEffect(() => {
     return onSnapshot(
       doc(clientDb, "settings", "ticker"),
@@ -222,7 +226,9 @@ function useTickerSettings(): { message: string; showTransactions: boolean } {
         if (snap.exists()) {
           const d = snap.data();
           setMessage((d.message as string) ?? "");
-          setShowTxs((d.showTransactions as boolean) ?? true);
+          // Use strict inequality: only hide transactions when the field is
+          // explicitly false in Firestore. Missing / undefined → keep showing.
+          setShowTxs(d.showTransactions !== false);
         } else {
           setMessage("");
           setShowTxs(true);
@@ -312,10 +318,12 @@ function DailyStarCard({
   boys,
   dailyTxs,
   hasBomb,
+  globalGoal,
 }: {
   boys: Boy[];
   dailyTxs: Transaction[];
   hasBomb: boolean;
+  globalGoal: number;
 }) {
   const { star, dailyAmt, isDefault } = useMemo(() => {
     if (dailyTxs.length === 0) {
@@ -344,7 +352,11 @@ function DailyStarCard({
     );
   }
 
-  const p = pct(star.totalRaised, star.goal);
+  // If the boy has no individual goal set, fall back to an equal share of
+  // the global campaign goal so percentages are always meaningful.
+  const perBoyGoal = globalGoal > 0 ? Math.round(globalGoal / Math.max(boys.length, 1)) : 0;
+  const effectiveGoal = star.goal > 0 ? star.goal : perBoyGoal;
+  const p = pct(star.totalRaised, effectiveGoal);
   const z = Z[getZone(p)];
 
   return (
@@ -374,9 +386,9 @@ function DailyStarCard({
         />
       </div>
 
-      {/* Name — uses the Artifont special font from tailwind.config.js */}
+      {/* Name — leader gets both artifont-title (for later font swap) and the existing special font */}
       <h2
-        className={`font-artifont-special relative z-10 mt-3 text-center text-4xl font-bold tracking-tight ${z.text}`}
+        className={`font-artifont-title font-artifont-special relative z-10 mt-3 text-center text-4xl font-bold tracking-tight ${z.text}`}
       >
         {star.name}
       </h2>
@@ -412,6 +424,16 @@ function DailyStarCard({
           />
         </div>
       )}
+
+      {/* Confetti overlay — permanent celebration for the daily leader */}
+      <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center overflow-hidden">
+        <img
+          src="/assets/confetti.gif"
+          alt=""
+          aria-hidden
+          className="h-full w-full object-cover opacity-50"
+        />
+      </div>
     </div>
   );
 }
@@ -499,7 +521,7 @@ function LegendCard() {
 
 interface ShiurRow { name: string; raised: number; goal: number; count: number }
 
-function ShiurPanel({ boys, coinsShiurNames }: { boys: Boy[]; coinsShiurNames: Set<string> }) {
+function ShiurPanel({ boys, coinsShiurNames, globalGoal }: { boys: Boy[]; coinsShiurNames: Set<string>; globalGoal: number }) {
   const rows = useMemo<ShiurRow[]>(() => {
     const map = new Map<string, ShiurRow>();
     for (const b of boys) {
@@ -518,8 +540,15 @@ function ShiurPanel({ boys, coinsShiurNames }: { boys: Boy[]; coinsShiurNames: S
     <Panel title="דירוג שיעורים" icon="🏫" accentBorder="border-violet-500/20">
       <div className="flex flex-col gap-3">
         {rows.map((r, i) => {
-          const p = pct(r.raised, r.goal);
-          const z = Z[getZone(p)];
+          // If boys have no individual goals, use each shiur's proportional
+          // share of globalGoal (by boy count) as the denominator.
+          const proportionalGoal = globalGoal > 0
+            ? Math.round(globalGoal * (r.count / Math.max(boys.length, 1)))
+            : 0;
+          const effectiveGoal    = r.goal > 0 ? r.goal : proportionalGoal;
+          const p        = pct(r.raised, effectiveGoal);
+          const z        = Z[getZone(p)];
+          const isLeader = i === 0;
           return (
             <div key={r.name} className={`relative overflow-hidden rounded-xl p-3.5 ring-1 ${z.dim} ${z.ring}`}>
               {/* Coins GIF — absolute background for this specific shiur row only */}
@@ -531,13 +560,31 @@ function ShiurPanel({ boys, coinsShiurNames }: { boys: Boy[]; coinsShiurNames: S
                   className="pointer-events-none absolute inset-0 z-0 h-full w-full object-cover opacity-50"
                 />
               )}
+              {/* Confetti overlay — leader (top-ranked shiur) only */}
+              {isLeader && (
+                <img
+                  src="/assets/confetti.gif"
+                  alt=""
+                  aria-hidden
+                  className="pointer-events-none absolute inset-0 z-0 h-full w-full object-cover opacity-40"
+                />
+              )}
               <div className="relative z-10 flex items-center gap-3">
                 <span className="shrink-0 text-xl leading-none">
                   {MEDALS[i] ?? `#${i + 1}`}
                 </span>
+                {/* Profile picture placeholder — leader row only */}
+                {isLeader && (
+                  <img
+                    src="/assets/leizan.png"
+                    alt=""
+                    aria-hidden
+                    className={`h-8 w-8 shrink-0 rounded-full object-cover ring-2 ${z.ring}`}
+                  />
+                )}
                 <div className="min-w-0 flex-1">
                   <div className="flex items-baseline justify-between gap-2">
-                    <p className={`truncate font-bold ${z.text}`}>{r.name}</p>
+                    <p className={`truncate font-bold ${isLeader ? "font-artifont-title" : ""} ${z.text}`}>{r.name}</p>
                     <p className={`shrink-0 text-sm font-bold tabular-nums ${z.text}`}>
                       {nis(r.raised)}
                     </p>
@@ -738,7 +785,7 @@ function AnnouncementsPanel({
 
 // ─── Left Column — Bottom Half: In-Field Vertical Marquee ────────────────────────
 
-function InFieldPanel({ boys, className = "" }: { boys: Boy[]; className?: string }) {
+function InFieldPanel({ boys, globalGoal, className = "" }: { boys: Boy[]; globalGoal: number; className?: string }) {
   const inField = useMemo(
     () => boys.filter((b) => b.status === "in_field"),
     [boys],
@@ -771,27 +818,37 @@ function InFieldPanel({ boys, className = "" }: { boys: Boy[]; className?: strin
         ) : (
           <div className="marquee-up" style={{ animationDuration: duration }}>
             {/* First copy */}
-            {inField.map((b) => (
-              <div
-                key={b.id}
-                className="flex items-center gap-4 border-b border-white/5 px-5 py-3"
-              >
-                <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-teal-400 shadow-sm shadow-teal-400/50" />
-                <span className="flex-1 text-xl font-bold text-white">{b.name}</span>
-                <span className="shrink-0 text-xs text-white/40">{b.shiur}</span>
-              </div>
-            ))}
+            {inField.map((b) => {
+              const perBoy    = globalGoal > 0 ? Math.round(globalGoal / Math.max(boys.length, 1)) : 0;
+              const effGoal   = b.goal > 0 ? b.goal : perBoy;
+              const nameColor = Z[getZone(pct(b.totalRaised, effGoal))].text;
+              return (
+                <div
+                  key={b.id}
+                  className="flex items-center gap-4 border-b border-white/5 px-5 py-3"
+                >
+                  <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-teal-400 shadow-sm shadow-teal-400/50" />
+                  <span className={`flex-1 text-xl font-bold ${nameColor}`}>{b.name}</span>
+                  <span className="shrink-0 text-xs text-white/40">{b.shiur}</span>
+                </div>
+              );
+            })}
             {/* Second copy — seamless continuation */}
-            {inField.map((b) => (
-              <div
-                key={`dup-${b.id}`}
-                className="flex items-center gap-4 border-b border-white/5 px-5 py-3"
-              >
-                <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-teal-400 shadow-sm shadow-teal-400/50" />
-                <span className="flex-1 text-xl font-bold text-white">{b.name}</span>
-                <span className="shrink-0 text-xs text-white/40">{b.shiur}</span>
-              </div>
-            ))}
+            {inField.map((b) => {
+              const perBoy    = globalGoal > 0 ? Math.round(globalGoal / Math.max(boys.length, 1)) : 0;
+              const effGoal   = b.goal > 0 ? b.goal : perBoy;
+              const nameColor = Z[getZone(pct(b.totalRaised, effGoal))].text;
+              return (
+                <div
+                  key={`dup-${b.id}`}
+                  className="flex items-center gap-4 border-b border-white/5 px-5 py-3"
+                >
+                  <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-teal-400 shadow-sm shadow-teal-400/50" />
+                  <span className={`flex-1 text-xl font-bold ${nameColor}`}>{b.name}</span>
+                  <span className="shrink-0 text-xs text-white/40">{b.shiur}</span>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
@@ -812,29 +869,39 @@ function Ticker({
   customMessage: string;
   showTransactions: boolean;
 }) {
-  const content = useMemo(() => {
-    const parts: string[] = [];
+  const SEP = "   ·   ";
 
-    // Custom admin message appears first and prominently
-    if (customMessage.trim()) {
-      parts.push(`📢 ${customMessage.trim()}`);
-    }
+  // Render one copy of all ticker items as JSX spans.
+  // The [0,1].map() below duplicates this for the seamless loop.
+  function TickerItems({ prefix }: { prefix: string }) {
+    return (
+      <>
+        {customMessage.trim() && (
+          <span>📢 {customMessage.trim()}{SEP}</span>
+        )}
 
-    // Recent donations — only when the admin toggle is ON
-    if (showTransactions) {
-      txs.slice(0, 5).forEach((tx) => {
-        const base = `💳 ${tx.targetName || "תלמיד"} התרים ${nis(tx.amount)}`;
-        parts.push(tx.dedication ? `${base} — הקדשה: ${tx.dedication}` : base);
-      });
-    }
+        {/* ── Strict JSX conditional: transactions rendered ONLY when flag is ON ── */}
+        {showTransactions && txs.slice(0, 5).map((tx, i) => {
+          const base = `💳 ${tx.targetName || "תלמיד"} התרים ${nis(tx.amount)}`;
+          const text = tx.dedication ? `${base} — הקדשה: ${tx.dedication}` : base;
+          return <span key={`${prefix}-tx-${i}`}>{text}{SEP}</span>;
+        })}
 
-    boys.slice(0, 3).forEach((b, i) => {
-      parts.push(`${MEDALS[i]} מקום ${i + 1}: ${b.name} — ${nis(b.totalRaised)}`);
-    });
-    return parts.join("   ·   ");
-  }, [boys, txs, customMessage, showTransactions]);
+        {boys.slice(0, 3).map((b, i) => (
+          <span key={`${prefix}-boy-${b.id}`}>
+            {MEDALS[i]} מקום {i + 1}: {b.name} — {nis(b.totalRaised)}{SEP}
+          </span>
+        ))}
+      </>
+    );
+  }
 
-  if (!content) {
+  const hasContent =
+    customMessage.trim() ||
+    (showTransactions && txs.length > 0) ||
+    boys.length > 0;
+
+  if (!hasContent) {
     return <div className="h-10 overflow-hidden border-t border-white/10 bg-gray-900/90" />;
   }
 
@@ -842,11 +909,12 @@ function Ticker({
     <div className="h-10 overflow-hidden border-t border-white/10 bg-gray-900/90">
       <div className="flex h-full items-center">
         {/*
-         * Text is duplicated so translateX(-50%) creates a seamless loop:
-         * the second copy fills in exactly as the first scrolls off-screen.
+         * Rendered twice so translateX(-50%) creates a seamless marquee loop.
+         * Keys are prefixed to avoid React duplicate-key warnings.
          */}
         <div className="ticker-track inline-block whitespace-nowrap text-sm text-white/50">
-          {content}&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;{content}
+          <TickerItems prefix="a" />
+          <TickerItems prefix="b" />
         </div>
       </div>
     </div>
@@ -870,7 +938,7 @@ export function Leaderboard() {
   const { txs,  loading: tl }     = useRecentTransactions();
   const dailyTxs                  = useDailyTransactions();
   const { settings, loading: sl } = useSettings();
-  const tickerMessage             = useTickerMessage();
+  const { message: tickerMessage, showTransactions } = useTickerSettings();
 
   // ── Audio refs (three separate players) ──────────────────────────────────────
   const bgMusicRef  = useRef<HTMLAudioElement>(null);
@@ -1070,6 +1138,7 @@ export function Leaderboard() {
                   boys={boys}
                   dailyTxs={dailyTxs}
                   hasBomb={bombBoyIds.size > 0}
+                  globalGoal={settings.globalGoal}
                 />
                 <LegendCard />
               </div>
@@ -1078,7 +1147,7 @@ export function Leaderboard() {
 
             {/* ── Body (3 columns, fills remaining space) ── */}
             <div className="relative z-[1] grid min-h-0 flex-1 grid-cols-[1fr_2fr_1fr] gap-4 px-4 pb-4">
-              <ShiurPanel boys={boys} coinsShiurNames={coinsShiurNames} />
+              <ShiurPanel boys={boys} coinsShiurNames={coinsShiurNames} globalGoal={settings.globalGoal} />
               {/* Center: branding label + recent donors panel */}
               <div className="flex min-h-0 flex-col gap-1.5">
                 <p className="shrink-0 text-center text-[10px] font-medium tracking-widest text-white/20 whitespace-nowrap">
@@ -1096,13 +1165,13 @@ export function Leaderboard() {
                   announcements={settings.announcements}
                   className="flex-1 min-h-0"
                 />
-                <InFieldPanel boys={boys} className="flex-1 min-h-0" />
+                <InFieldPanel boys={boys} globalGoal={settings.globalGoal} className="flex-1 min-h-0" />
               </div>
             </div>
 
             {/* ── Footer: ticker + audio unlock button ── */}
             <div className="relative shrink-0">
-              <Ticker boys={boys} txs={txs} customMessage={tickerMessage} />
+              <Ticker boys={boys} txs={txs} customMessage={tickerMessage} showTransactions={showTransactions} />
               {/*
                * Audio unlock button — browsers block autoplay until the user
                * interacts with the page. Clicking this unlocks the audio context

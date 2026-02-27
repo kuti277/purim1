@@ -88,6 +88,16 @@ function IconBinder({ active }: { active: boolean }) {
   );
 }
 
+function IconAddressBank({ active }: { active: boolean }) {
+  return (
+    <svg className={`h-5 w-5 shrink-0 ${active ? "text-white" : "text-slate-500"}`}
+      fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75} aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round"
+        d="M2.25 12c0-5.385 4.365-9.75 9.75-9.75s9.75 4.365 9.75 9.75-4.365 9.75-9.75 9.75S2.25 17.385 2.25 12zm0 0H21M12 2.25v19.5M2.25 8.25H21M2.25 15.75H21" />
+    </svg>
+  );
+}
+
 function IconFolder({ active }: { active: boolean }) {
   return (
     <svg className={`h-5 w-5 shrink-0 ${active ? "text-white" : "text-slate-500"}`}
@@ -225,6 +235,18 @@ export function DashboardLayout() {
                 <>
                   <IconBinder active={isActive} />
                   <span>ניהול קלסרים</span>
+                  {isActive && (
+                    <span className="mr-auto inline-flex h-1.5 w-1.5 rounded-full bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.9)]" />
+                  )}
+                </>
+              )}
+            </NavLink>
+
+            <NavLink to="/address-bank" className={navLinkClass}>
+              {({ isActive }) => (
+                <>
+                  <IconAddressBank active={isActive} />
+                  <span>מאגר כתובות</span>
                   {isActive && (
                     <span className="mr-auto inline-flex h-1.5 w-1.5 rounded-full bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.9)]" />
                   )}
