@@ -95,7 +95,7 @@ export function AlertsPage() {
   const [popupMsg, setPopupMsg]       = useState("");
   const [imageUrl, setImageUrl]       = useState("");
   const [displayMode, setDisplayMode] = useState<"text" | "image" | "text_on_image">("text");
-  const [duration, setDuration]       = useState(7);
+  const [duration, setDuration]       = useState(10);
   const [isInfinite, setIsInfinite]   = useState(false);
   const [uploading, setUploading]     = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -202,6 +202,12 @@ export function AlertsPage() {
     }
   }
 
+  function handlePickRandom() {
+    if (gallery.length === 0) return;
+    const pick = gallery[Math.floor(Math.random() * gallery.length)];
+    setImageUrl(pick);
+  }
+
   async function handleKillPopup() {
     setKilling(true);
     try {
@@ -236,15 +242,21 @@ export function AlertsPage() {
         <div className="absolute top-0 inset-x-0 h-[3px] bg-gradient-to-r from-purple-500 to-pink-500" />
         <div className="p-6 space-y-5">
 
-          <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-purple-500/10 ring-1 ring-purple-500/30">
-              <svg className="h-4 w-4 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0" />
-              </svg>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-purple-500/10 ring-1 ring-purple-500/30">
+                <svg className="h-4 w-4 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M14.857 17.082a23.848 23.848 0 0 0 5.454-1.31A8.967 8.967 0 0 1 18 9.75V9A6 6 0 0 0 6 9v.75a8.967 8.967 0 0 1-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 0 1-5.714 0m5.714 0a3 3 0 1 1-5.714 0" />
+                </svg>
+              </div>
+              <div>
+                <h2 className="text-sm font-black text-white">קפיצת מסך ראווה</h2>
+                <p className="text-xs text-slate-500">שלח הודעה מיידית שתצוץ על גבי מסך הראווה</p>
+              </div>
             </div>
-            <div>
-              <h2 className="text-sm font-black text-white">קפיצת מסך ראווה</h2>
-              <p className="text-xs text-slate-500">שלח הודעה מיידית שתצוץ על גבי מסך הראווה</p>
+            <div className="flex items-center gap-1.5">
+              <span className="h-1.5 w-1.5 rounded-full bg-purple-400 shadow-[0_0_6px_rgba(168,85,247,0.9)] animate-pulse" />
+              <span className="text-[10px] font-bold uppercase tracking-widest text-purple-400">LIVE</span>
             </div>
           </div>
 
@@ -280,7 +292,7 @@ export function AlertsPage() {
                 className="w-full rounded-lg bg-slate-800 border border-slate-700 text-white px-3 py-2.5 text-sm focus:border-purple-500/70 focus:outline-none focus:ring-1 focus:ring-purple-500/25 disabled:opacity-40"
               >
                 {[5, 10, 15, 20].map((s) => (
-                  <option key={s} value={s}>{s} שניות</option>
+                  <option key={s} value={s}>{`${s} שניות`}</option>
                 ))}
               </select>
             </div>
@@ -358,7 +370,7 @@ export function AlertsPage() {
                         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth={4} />
                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                       </svg>
-                      {uploadProgress}%
+                      <span>{`${uploadProgress}%`}</span>
                     </>
                   ) : (
                     <>
@@ -410,39 +422,97 @@ export function AlertsPage() {
 
               {/* Recent gallery */}
               {gallery.length > 0 && (
-                <div>
-                  <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-slate-500">
-                    גלריית תמונות אחרונות
-                  </p>
-                  <div className="flex flex-wrap gap-2">
+                <div className="rounded-xl border border-slate-700/60 bg-slate-800/40 p-4 space-y-3">
+
+                  {/* Gallery header */}
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <svg className="h-3.5 w-3.5 text-purple-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="m2.25 15.75 5.159-5.159a2.25 2.25 0 0 1 3.182 0l5.159 5.159m-1.5-1.5 1.409-1.409a2.25 2.25 0 0 1 3.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 0 0 1.5-1.5V6a1.5 1.5 0 0 0-1.5-1.5H3.75A1.5 1.5 0 0 0 2.25 6v12a1.5 1.5 0 0 0 1.5 1.5Zm10.5-11.25h.008v.008h-.008V8.25Zm.375 0a.375.375 0 1 1-.75 0 .375.375 0 0 1 .75 0Z" />
+                      </svg>
+                      <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                        גלריית תמונות אחרונות
+                      </span>
+                      <span className="rounded-full bg-slate-700 px-1.5 py-0.5 text-[10px] font-bold tabular-nums text-slate-400">
+                        {`${gallery.length}/10`}
+                      </span>
+                    </div>
+
+                    {/* Random pick button */}
+                    <button
+                      type="button"
+                      onClick={handlePickRandom}
+                      disabled={uploading || pushing || gallery.length === 0}
+                      className="flex items-center gap-1.5 rounded-lg border border-purple-500/30 bg-purple-500/10 px-3 py-1.5 text-xs font-bold text-purple-300 hover:bg-purple-500/20 hover:border-purple-400/50 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                    >
+                      <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 12c0-1.232-.046-2.453-.138-3.662a4.006 4.006 0 0 0-3.7-3.7 48.678 48.678 0 0 0-7.324 0 4.006 4.006 0 0 0-3.7 3.7c-.017.22-.032.441-.046.662M19.5 12l3-3m-3 3-3-3m-12 3c0 1.232.046 2.453.138 3.662a4.006 4.006 0 0 0 3.7 3.7 48.656 48.656 0 0 0 7.324 0 4.006 4.006 0 0 0 3.7-3.7c.017-.22.032-.441.046-.662M4.5 12l3 3m-3-3-3 3" />
+                      </svg>
+                      בחר אקראי
+                    </button>
+                  </div>
+
+                  {/* Thumbnail grid */}
+                  <div className="grid grid-cols-5 gap-2">
                     {[...gallery].reverse().map((url, i) => (
                       <button
                         key={i}
                         type="button"
-                        onClick={() => setImageUrl(url)}
+                        onClick={() => setImageUrl(url === imageUrl ? "" : url)}
                         title={url}
-                        className={`relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border-2 transition-all hover:scale-105 focus:outline-none ${
+                        className={`group relative aspect-square overflow-hidden rounded-lg border-2 transition-all duration-200 hover:scale-[1.03] focus:outline-none ${
                           imageUrl === url
-                            ? "border-purple-500 shadow-[0_0_10px_rgba(168,85,247,0.5)]"
-                            : "border-slate-700 hover:border-slate-500"
+                            ? "border-purple-500 shadow-[0_0_14px_rgba(168,85,247,0.6)] ring-1 ring-purple-500/40"
+                            : "border-slate-700/80 hover:border-purple-500/40"
                         }`}
                       >
                         <img
                           src={url}
                           alt=""
-                          className="h-full w-full object-cover"
+                          className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-110"
                           draggable={false}
                         />
+                        {/* Hover overlay */}
+                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors" />
+                        {/* Selected overlay */}
                         {imageUrl === url && (
-                          <div className="absolute inset-0 flex items-center justify-center bg-purple-500/20">
-                            <svg className="h-5 w-5 text-white drop-shadow" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
-                            </svg>
+                          <div className="absolute inset-0 flex items-center justify-center bg-purple-500/25">
+                            <div className="flex h-6 w-6 items-center justify-center rounded-full bg-purple-500 shadow-lg">
+                              <svg className="h-3.5 w-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                                <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
+                              </svg>
+                            </div>
+                          </div>
+                        )}
+                        {/* Index badge */}
+                        {imageUrl !== url && (
+                          <div className="absolute bottom-1 right-1 rounded bg-black/50 px-1 py-0.5 text-[9px] font-bold tabular-nums text-white/60 opacity-0 group-hover:opacity-100 transition-opacity">
+                            {String(i + 1)}
                           </div>
                         )}
                       </button>
                     ))}
                   </div>
+
+                  {/* Selected preview strip */}
+                  {imageUrl && gallery.includes(imageUrl) && (
+                    <div className="flex items-center gap-2 rounded-lg border border-purple-500/20 bg-purple-500/5 px-3 py-2">
+                      <img src={imageUrl} alt="" className="h-8 w-8 rounded object-cover shrink-0" />
+                      <span className="flex-1 truncate text-xs font-mono text-purple-300/70 text-left" dir="ltr">
+                        {imageUrl}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setImageUrl("")}
+                        className="shrink-0 text-slate-500 hover:text-slate-300 transition-colors"
+                      >
+                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </div>
+                  )}
+
                 </div>
               )}
 
