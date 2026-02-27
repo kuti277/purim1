@@ -90,9 +90,14 @@ export function AlertsPage() {
   }, []);
 
   // ── Showcase popup trigger ────────────────────────────────────────────────
-  const [popupMsg, setPopupMsg]     = useState("");
-  const [pushing, setPushing]       = useState(false);
-  const [pushResult, setPushResult] = useState<{ ok: boolean; text: string } | null>(null);
+  const [popupMsg, setPopupMsg]       = useState("");
+  const [imageUrl, setImageUrl]       = useState("");
+  const [displayMode, setDisplayMode] = useState<"text" | "image" | "text_on_image">("text");
+  const [duration, setDuration]       = useState(7);
+  const [isInfinite, setIsInfinite]   = useState(false);
+  const [pushing, setPushing]         = useState(false);
+  const [killing, setKilling]         = useState(false);
+  const [pushResult, setPushResult]   = useState<{ ok: boolean; text: string } | null>(null);
   const pushResultTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -101,27 +106,55 @@ export function AlertsPage() {
     };
   }, []);
 
+  function showFeedback(ok: boolean, text: string) {
+    setPushResult({ ok, text });
+    if (pushResultTimer.current) clearTimeout(pushResultTimer.current);
+    pushResultTimer.current = setTimeout(() => setPushResult(null), 4000);
+  }
+
   async function handlePushPopup() {
-    const msg = popupMsg.trim();
-    if (!msg) return;
+    const needsText  = displayMode === "text" || displayMode === "text_on_image";
+    const needsImage = displayMode === "image" || displayMode === "text_on_image";
+    if (needsText  && !popupMsg.trim())  { showFeedback(false, "יש להזין תוכן הודעה"); return; }
+    if (needsImage && !imageUrl.trim())  { showFeedback(false, "יש להזין קישור לתמונה"); return; }
     setPushing(true);
     setPushResult(null);
     try {
       await setDoc(doc(clientDb, "settings", "showcase_popup"), {
-        message:      msg,
-        triggeredAt:  serverTimestamp(),
-        triggeredBy:  user?.displayName ?? "מנהל",
-        active:       true,
+        message:     popupMsg.trim(),
+        imageUrl:    imageUrl.trim(),
+        displayMode,
+        duration,
+        isInfinite,
+        triggeredAt: serverTimestamp(),
+        triggeredBy: user?.displayName ?? "מנהל",
+        isActive:    true,
       });
       setPopupMsg("");
-      setPushResult({ ok: true, text: "✓ הפופאפ הוצף למסך הראווה" });
+      setImageUrl("");
+      showFeedback(true, "✓ הפופאפ הוצף למסך הראווה");
     } catch (err) {
       console.error("[AlertsPage] push popup error:", err);
-      setPushResult({ ok: false, text: "שגיאה — לא ניתן לשלוח את ההודעה" });
+      showFeedback(false, "שגיאה — לא ניתן לשלוח את ההודעה");
     } finally {
       setPushing(false);
-      if (pushResultTimer.current) clearTimeout(pushResultTimer.current);
-      pushResultTimer.current = setTimeout(() => setPushResult(null), 4000);
+    }
+  }
+
+  async function handleKillPopup() {
+    setKilling(true);
+    try {
+      await setDoc(
+        doc(clientDb, "settings", "showcase_popup"),
+        { isActive: false },
+        { merge: true }
+      );
+      showFeedback(true, "⏹ ההודעה כובתה בהצלחה");
+    } catch (err) {
+      console.error("[AlertsPage] kill popup error:", err);
+      showFeedback(false, "שגיאה — לא ניתן לכבות את ההודעה");
+    } finally {
+      setKilling(false);
     }
   }
 
@@ -154,12 +187,70 @@ export function AlertsPage() {
             </div>
           </div>
 
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-            <div className="flex-1">
-              <label
-                htmlFor="popup-msg"
-                className="block mb-1.5 text-[10px] font-bold uppercase tracking-widest text-slate-500"
+          {/* ── Row 1: display mode · duration · infinite ── */}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+
+            {/* Display mode */}
+            <div>
+              <label className="block mb-1.5 text-[10px] font-bold uppercase tracking-widest text-slate-500">
+                סוג תצוגה
+              </label>
+              <select
+                value={displayMode}
+                onChange={(e) => setDisplayMode(e.target.value as typeof displayMode)}
+                disabled={pushing}
+                className="w-full rounded-lg bg-slate-800 border border-slate-700 text-white px-3 py-2.5 text-sm focus:border-purple-500/70 focus:outline-none focus:ring-1 focus:ring-purple-500/25 disabled:opacity-40"
               >
+                <option value="text">טקסט בלבד</option>
+                <option value="image">תמונה בלבד</option>
+                <option value="text_on_image">טקסט על גבי תמונה</option>
+              </select>
+            </div>
+
+            {/* Duration */}
+            <div>
+              <label className="block mb-1.5 text-[10px] font-bold uppercase tracking-widest text-slate-500">
+                זמן תצוגה (שניות)
+              </label>
+              <select
+                value={duration}
+                onChange={(e) => setDuration(Number(e.target.value))}
+                disabled={pushing || isInfinite}
+                className="w-full rounded-lg bg-slate-800 border border-slate-700 text-white px-3 py-2.5 text-sm focus:border-purple-500/70 focus:outline-none focus:ring-1 focus:ring-purple-500/25 disabled:opacity-40"
+              >
+                {[5, 10, 15, 20].map((s) => (
+                  <option key={s} value={s}>{s} שניות</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Infinite toggle */}
+            <div className="flex flex-col justify-end">
+              <label className="block mb-1.5 text-[10px] font-bold uppercase tracking-widest text-slate-500">
+                זמן ידני
+              </label>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={isInfinite}
+                onClick={() => setIsInfinite((v) => !v)}
+                disabled={pushing}
+                className="flex items-center gap-3 rounded-lg border border-slate-700 bg-slate-800/60 px-3 py-2.5 text-sm text-slate-300 hover:bg-slate-800 transition-colors disabled:opacity-40"
+              >
+                <span className={`relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors ${isInfinite ? "bg-purple-500" : "bg-slate-600"}`}>
+                  <span className={`inline-block h-3.5 w-3.5 rounded-full bg-white shadow transition-transform ${isInfinite ? "translate-x-[18px]" : "translate-x-[3px]"}`} />
+                </span>
+                <span className={isInfinite ? "text-purple-300" : "text-slate-500"}>
+                  {isInfinite ? "עד לכיבוי ידני" : "ידני — השאר עד כיבוי"}
+                </span>
+              </button>
+            </div>
+          </div>
+
+          {/* ── Row 2: Message input (hidden for image-only) ── */}
+          {displayMode !== "image" && (
+            <div>
+              <label htmlFor="popup-msg" className="block mb-1.5 text-[10px] font-bold uppercase tracking-widest text-slate-500">
                 תוכן ההודעה
               </label>
               <input
@@ -169,16 +260,39 @@ export function AlertsPage() {
                 placeholder="הזן הודעה שתוצג על המסך..."
                 value={popupMsg}
                 onChange={(e) => setPopupMsg(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter" && !pushing) void handlePushPopup(); }}
                 disabled={pushing}
                 className="w-full rounded-lg bg-slate-800 border border-slate-700 text-white placeholder-slate-500 px-3 py-2.5 text-sm transition-colors focus:border-purple-500/70 focus:outline-none focus:ring-1 focus:ring-purple-500/25 disabled:opacity-40"
               />
             </div>
+          )}
+
+          {/* ── Row 3: Image URL (hidden for text-only) ── */}
+          {displayMode !== "text" && (
+            <div>
+              <label htmlFor="popup-img" className="block mb-1.5 text-[10px] font-bold uppercase tracking-widest text-slate-500">
+                קישור לתמונה
+              </label>
+              <input
+                id="popup-img"
+                type="url"
+                dir="ltr"
+                placeholder="https://..."
+                value={imageUrl}
+                onChange={(e) => setImageUrl(e.target.value)}
+                disabled={pushing}
+                className="w-full rounded-lg bg-slate-800 border border-slate-700 text-white placeholder-slate-500 px-3 py-2.5 text-sm font-mono transition-colors focus:border-purple-500/70 focus:outline-none focus:ring-1 focus:ring-purple-500/25 disabled:opacity-40"
+              />
+            </div>
+          )}
+
+          {/* ── Row 4: Action buttons ── */}
+          <div className="flex items-center gap-3">
+            {/* Push button */}
             <button
               type="button"
               onClick={() => void handlePushPopup()}
-              disabled={pushing || !popupMsg.trim()}
-              className="flex items-center gap-2 rounded-xl bg-purple-600 px-5 py-2.5 text-sm font-black text-white shadow-[0_0_16px_rgba(168,85,247,0.3)] hover:bg-purple-500 disabled:opacity-40 disabled:cursor-not-allowed transition-all shrink-0"
+              disabled={pushing || killing}
+              className="flex items-center gap-2 rounded-xl bg-purple-600 px-5 py-2.5 text-sm font-black text-white shadow-[0_0_16px_rgba(168,85,247,0.3)] hover:bg-purple-500 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
             >
               {pushing ? (
                 <>
@@ -194,6 +308,31 @@ export function AlertsPage() {
                     <path strokeLinecap="round" strokeLinejoin="round" d="M6 12 3.269 3.125A59.769 59.769 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L5.999 12Zm0 0h7.5" />
                   </svg>
                   הקפץ למסך ראווה
+                </>
+              )}
+            </button>
+
+            {/* Kill button */}
+            <button
+              type="button"
+              onClick={() => void handleKillPopup()}
+              disabled={pushing || killing}
+              className="flex items-center gap-2 rounded-xl border border-red-500/40 bg-red-500/10 px-5 py-2.5 text-sm font-black text-red-400 hover:bg-red-500/20 hover:border-red-400/60 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+            >
+              {killing ? (
+                <>
+                  <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth={4} />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                  </svg>
+                  מכבה...
+                </>
+              ) : (
+                <>
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M5.25 7.5A2.25 2.25 0 0 1 7.5 5.25h9a2.25 2.25 0 0 1 2.25 2.25v9a2.25 2.25 0 0 1-2.25 2.25h-9a2.25 2.25 0 0 1-2.25-2.25v-9Z" />
+                  </svg>
+                  כבה הודעה עכשיו
                 </>
               )}
             </button>
