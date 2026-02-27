@@ -11,6 +11,7 @@ import {
   updateDoc,
 } from "firebase/firestore";
 import { clientDb } from "../lib/firebase";
+import { NedarimPaymentModal } from "../components/NedarimPaymentModal";
 
 // ─── Local types ──────────────────────────────────────────────────────────────
 
@@ -563,6 +564,7 @@ export function TransactionsPage() {
   const [loading, setLoading] = useState(true);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
+  const [nedarimOpen, setNedarimOpen] = useState(false);
 
   const successTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -655,12 +657,36 @@ export function TransactionsPage() {
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
     <div className="space-y-6">
+      {/* Nedarim payment modal */}
+      <NedarimPaymentModal
+        open={nedarimOpen}
+        onClose={() => setNedarimOpen(false)}
+        boys={boys.map((b) => ({ id: b.id, name: b.name }))}
+        onSuccess={(amount, boyName) =>
+          showSuccess(
+            `תשלום של ₪${amount.toLocaleString("he-IL")} עבור ${boyName} בוצע בהצלחה`
+          )
+        }
+      />
+
       {/* Page heading */}
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">תרומות ועסקאות</h1>
-        <p className="mt-1 text-sm text-gray-500">
-          הזנת תרומות ידנית וצפייה בהיסטוריית עסקאות בזמן אמת
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">תרומות ועסקאות</h1>
+          <p className="mt-1 text-sm text-gray-500">
+            הזנת תרומות ידנית וצפייה בהיסטוריית עסקאות בזמן אמת
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => setNedarimOpen(true)}
+          className="flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 transition-colors"
+        >
+          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 8.25h19.5M2.25 9h19.5m-16.5 5.25h6m-6 2.25h3m-3.75 3h15a2.25 2.25 0 0 0 2.25-2.25V6.75A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25v10.5A2.25 2.25 0 0 0 4.5 21Z" />
+          </svg>
+          תשלום Nedarim Plus
+        </button>
       </div>
 
       {/* Success toast */}

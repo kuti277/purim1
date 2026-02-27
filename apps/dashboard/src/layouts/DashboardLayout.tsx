@@ -108,6 +108,16 @@ function IconFolder({ active }: { active: boolean }) {
   );
 }
 
+function IconSync({ active }: { active: boolean }) {
+  return (
+    <svg className={`h-5 w-5 shrink-0 ${active ? "text-white" : "text-slate-500"}`}
+      fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75} aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round"
+        d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
+    </svg>
+  );
+}
+
 // ─── Layout ───────────────────────────────────────────────────────────────────
 
 export function DashboardLayout() {
@@ -283,6 +293,18 @@ export function DashboardLayout() {
                 <>
                   <IconTicker active={isActive} />
                   <span>ניהול טיקר</span>
+                  {isActive && (
+                    <span className="mr-auto inline-flex h-1.5 w-1.5 rounded-full bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.9)]" />
+                  )}
+                </>
+              )}
+            </NavLink>
+
+            <NavLink to="/sync-center" className={navLinkClass}>
+              {({ isActive }) => (
+                <>
+                  <IconSync active={isActive} />
+                  <span>מרכז סנכרון</span>
                   {isActive && (
                     <span className="mr-auto inline-flex h-1.5 w-1.5 rounded-full bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.9)]" />
                   )}

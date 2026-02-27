@@ -404,7 +404,7 @@ function DailyStarCard({
 
       {/* Progress bar */}
       <div className="relative z-10 mt-3 w-full max-w-[200px]">
-        <Bar raised={star.totalRaised} goal={star.goal} cls={z.bar} />
+        <Bar raised={star.totalRaised} goal={effectiveGoal} cls={z.bar} />
         <p className={`mt-1 text-center text-xs tabular-nums ${z.text}`} dir="ltr">
           {p.toFixed(1)}%
         </p>
@@ -590,7 +590,7 @@ function ShiurPanel({ boys, coinsShiurNames, globalGoal }: { boys: Boy[]; coinsS
                     </p>
                   </div>
                   <div className="mt-2">
-                    <Bar raised={r.raised} goal={r.goal} cls={z.bar} />
+                    <Bar raised={r.raised} goal={effectiveGoal} cls={z.bar} />
                   </div>
                   <p className="mt-1 text-xs text-white/30">
                     {p.toFixed(0)}% · {r.count} {r.count === 1 ? "תלמיד" : "תלמידים"} · יעד {nis(r.goal)}
@@ -1000,11 +1000,14 @@ export function Leaderboard() {
   const donationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Per-shiur coins timers — keyed by shiur name.
   const coinsTimerRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  // Per-boyId bomb overlay timers — keyed by boyId.
+  const bombTimerRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
   useEffect(() => {
     return () => {
       if (donationTimerRef.current) clearTimeout(donationTimerRef.current);
       for (const t of coinsTimerRef.current.values()) clearTimeout(t);
+      for (const t of bombTimerRef.current.values()) clearTimeout(t);
     };
   }, []);
 
@@ -1062,13 +1065,17 @@ export function Leaderboard() {
       if (tx.amount > 50) {
         const boyId = tx.targetId;
         setBombBoyIds((prev) => new Set([...prev, boyId]));
-        setTimeout(() => {
+        const existing = bombTimerRef.current.get(boyId);
+        if (existing) clearTimeout(existing);
+        const bt = setTimeout(() => {
           setBombBoyIds((prev) => {
             const next = new Set(prev);
             next.delete(boyId);
             return next;
           });
+          bombTimerRef.current.delete(boyId);
         }, 30_000);
+        bombTimerRef.current.set(boyId, bt);
       }
     }
   }, [txs]);

@@ -133,13 +133,17 @@ function FieldPageContent() {
   async function addBoy() {
     if (!selected || !addBoyId) return;
     const phone = noPhone ? "" : shiftPhone.trim();
-    await updateDoc(doc(clientDb, "boys", addBoyId), {
-      folderId: selected.id,
-      shiftPhone: phone,
-    });
-    setAddBoyId("");
-    setShiftPhone("");
-    setNoPhone(false);
+    try {
+      await updateDoc(doc(clientDb, "boys", addBoyId), {
+        folderId: selected.id,
+        shiftPhone: phone,
+      });
+      setAddBoyId("");
+      setShiftPhone("");
+      setNoPhone(false);
+    } catch (err) {
+      console.error("[FoldersPage] addBoy error:", err);
+    }
   }
 
   async function removeBoy(boyId: string) {
@@ -152,7 +156,11 @@ function FieldPageContent() {
         statusUpdatedAt: serverTimestamp(),
       });
     }
-    await batch.commit();
+    try {
+      await batch.commit();
+    } catch (err) {
+      console.error("[FoldersPage] removeBoy error:", err);
+    }
   }
 
   async function releaseToField() {
@@ -171,6 +179,8 @@ function FieldPageContent() {
         statusUpdatedAt: serverTimestamp(),
       });
       await batch.commit();
+    } catch (err) {
+      console.error("[FoldersPage] releaseToField error:", err);
     } finally {
       setReleasing(false);
     }
@@ -184,7 +194,11 @@ function FieldPageContent() {
     inField.forEach((b) =>
       batch.update(doc(clientDb, "boys", b.id), { status: "not_out" }),
     );
-    await batch.commit();
+    try {
+      await batch.commit();
+    } catch (err) {
+      console.error("[FoldersPage] recallFromField error:", err);
+    }
   }
 
   // ── Render ───────────────────────────────────────────────────────────────────
