@@ -95,7 +95,7 @@ function nis(n: number): string {
 }
 
 function pct(raised: number, goal: number): number {
-  return goal > 0 ? Math.min((raised / goal) * 100, 100) : 0;
+  return goal > 0 ? (raised / goal) * 100 : 0;
 }
 
 /**
@@ -210,30 +210,39 @@ function useSettings(): { settings: GlobalSettings; loading: boolean } {
 
 /**
  * Listens to settings/ticker in real time.
- * Returns the custom admin message, or an empty string if none is set.
+ * Returns the custom admin message and the showTransactions toggle.
  */
-function useTickerMessage(): string {
-  const [message, setMessage] = useState("");
+function useTickerSettings(): { message: string; showTransactions: boolean } {
+  const [message, setMessage]               = useState("");
+  const [showTransactions, setShowTxs]      = useState(true); // default: show txs
   useEffect(() => {
     return onSnapshot(
       doc(clientDb, "settings", "ticker"),
       (snap) => {
-        setMessage(snap.exists() ? ((snap.data().message as string) ?? "") : "");
+        if (snap.exists()) {
+          const d = snap.data();
+          setMessage((d.message as string) ?? "");
+          setShowTxs((d.showTransactions as boolean) ?? true);
+        } else {
+          setMessage("");
+          setShowTxs(true);
+        }
       },
     );
   }, []);
-  return message;
+  return { message, showTransactions };
 }
 
 // ─── Primitives ─────────────────────────────────────────────────────────────────
 
 function Bar({ raised, goal, cls }: { raised: number; goal: number; cls: string }) {
-  const p = pct(raised, goal);
+  const p    = pct(raised, goal);
+  const visW = Math.min(p, 100);      // bar fills max 100% visually
   return (
     <div className="h-2 w-full overflow-hidden rounded-full bg-white/10">
       <div
         className={`h-full rounded-full transition-all duration-1000 ${cls}`}
-        style={{ width: `${p}%` }}
+        style={{ width: `${visW}%` }}
         role="progressbar"
         aria-valuenow={Math.round(p)}
         aria-valuemin={0}
@@ -415,12 +424,13 @@ function CampaignTotalCard({ boys, globalGoal }: { boys: Boy[]; globalGoal: numb
     [boys],
   );
 
-  // Use the admin-configured global goal when it's a valid positive number;
-  // otherwise fall back to the live sum of all individual boys' goals.
-  const goal = useMemo(
-    () => (globalGoal > 0 ? globalGoal : boys.reduce((s, b) => s + b.goal, 0)),
-    [globalGoal, boys],
-  );
+  // Use the admin-configured global goal only when it's set AND is at least as
+  // large as the sum of all individual boys' goals.  This guards against
+  // accidental tiny values (e.g. someone typed "5" meaning 5,000).
+  const goal = useMemo(() => {
+    const sum = boys.reduce((s, b) => s + b.goal, 0);
+    return (globalGoal > 0 && globalGoal >= sum) ? globalGoal : sum;
+  }, [globalGoal, boys]);
 
   const p = pct(raised, goal);
   const z = Z[getZone(p)];
@@ -439,7 +449,7 @@ function CampaignTotalCard({ boys, globalGoal }: { boys: Boy[]; globalGoal: numb
         <div className="h-5 w-full overflow-hidden rounded-full bg-white/10">
           <div
             className={`h-full rounded-full transition-all duration-1000 ${z.bar}`}
-            style={{ width: `${p}%` }}
+            style={{ width: `${Math.min(p, 100)}%` }}
             role="progressbar"
             aria-valuenow={Math.round(p)}
             aria-valuemin={0}
@@ -575,7 +585,7 @@ function TransactionsPanel({ txs, boys }: { txs: Transaction[]; boys: Boy[] }) {
   const duration = `${Math.max(20, txs.length * 4)}s`;
 
   // Render a single transaction row. Extracted to avoid JSX duplication.
-  function TxRow({ tx, i, dupKey }: { tx: Transaction; i: number; dupKey?: string }) {
+  function TxRow({ tx, dupKey }: { tx: Transaction; i?: number; dupKey?: string }) {
     const boy  = boyMap.get(tx.targetId);
     const is90 = boy != null && pct(boy.totalRaised, boy.goal) >= 90;
     const bp   = boy ? pct(boy.totalRaised, boy.goal) : 0;
@@ -612,7 +622,7 @@ function TransactionsPanel({ txs, boys }: { txs: Transaction[]; boys: Boy[] }) {
               <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-white/10">
                 <div
                   className={`h-full rounded-full transition-all duration-700 ${z ? z.bar : "bg-white/20"}`}
-                  style={{ width: `${bp}%` }}
+                  style={{ width: `${Math.min(bp, 100)}%` }}
                 />
               </div>
             </>
@@ -795,10 +805,12 @@ function Ticker({
   boys,
   txs,
   customMessage,
+  showTransactions,
 }: {
   boys: Boy[];
   txs: Transaction[];
   customMessage: string;
+  showTransactions: boolean;
 }) {
   const content = useMemo(() => {
     const parts: string[] = [];
@@ -808,15 +820,19 @@ function Ticker({
       parts.push(`📢 ${customMessage.trim()}`);
     }
 
-    txs.slice(0, 5).forEach((tx) => {
-      const base = `💳 ${tx.targetName || "תלמיד"} התרים ${nis(tx.amount)}`;
-      parts.push(tx.dedication ? `${base} — הקדשה: ${tx.dedication}` : base);
-    });
+    // Recent donations — only when the admin toggle is ON
+    if (showTransactions) {
+      txs.slice(0, 5).forEach((tx) => {
+        const base = `💳 ${tx.targetName || "תלמיד"} התרים ${nis(tx.amount)}`;
+        parts.push(tx.dedication ? `${base} — הקדשה: ${tx.dedication}` : base);
+      });
+    }
+
     boys.slice(0, 3).forEach((b, i) => {
       parts.push(`${MEDALS[i]} מקום ${i + 1}: ${b.name} — ${nis(b.totalRaised)}`);
     });
     return parts.join("   ·   ");
-  }, [boys, txs, customMessage]);
+  }, [boys, txs, customMessage, showTransactions]);
 
   if (!content) {
     return <div className="h-10 overflow-hidden border-t border-white/10 bg-gray-900/90" />;
