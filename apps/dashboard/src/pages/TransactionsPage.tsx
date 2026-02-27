@@ -34,6 +34,8 @@ interface BoyDoc {
   status: string;
   folderId: string;
   totalRaised: number;
+  nedarimName?: string;
+  donorNumber?: string;
 }
 
 interface FolderDoc {
@@ -73,129 +75,6 @@ const fieldCls =
 
 const labelCls = "text-xs font-medium text-gray-600";
 
-// ─── Credit card section ──────────────────────────────────────────────────────
-
-interface CreditFields {
-  cardNumber: string;
-  expiry: string;
-  cvv: string;
-  idNumber: string;
-  cardholderName: string;
-}
-
-const EMPTY_CREDIT: CreditFields = {
-  cardNumber: "",
-  expiry: "",
-  cvv: "",
-  idNumber: "",
-  cardholderName: "",
-};
-
-function CreditCardSection({
-  value,
-  onChange,
-}: {
-  value: CreditFields;
-  onChange: (f: CreditFields) => void;
-}) {
-  function set(key: keyof CreditFields) {
-    return (e: React.ChangeEvent<HTMLInputElement>) =>
-      onChange({ ...value, [key]: e.target.value });
-  }
-
-  return (
-    <div className="mt-4 rounded-xl border border-indigo-100 bg-indigo-50 p-4">
-      <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-indigo-700">
-        פרטי כרטיס אשראי
-      </p>
-      <div className="grid grid-cols-2 gap-3">
-        {/* Card number — full width */}
-        <div className="col-span-2 flex flex-col gap-1">
-          <label htmlFor="cc-number" className={labelCls}>
-            מספר כרטיס
-          </label>
-          <input
-            id="cc-number"
-            type="text"
-            dir="ltr"
-            placeholder="1234 5678 9012 3456"
-            maxLength={19}
-            value={value.cardNumber}
-            onChange={set("cardNumber")}
-            className={fieldCls}
-          />
-        </div>
-
-        {/* Expiry */}
-        <div className="flex flex-col gap-1">
-          <label htmlFor="cc-expiry" className={labelCls}>
-            תוקף
-          </label>
-          <input
-            id="cc-expiry"
-            type="text"
-            dir="ltr"
-            placeholder="MM/YY"
-            maxLength={5}
-            value={value.expiry}
-            onChange={set("expiry")}
-            className={fieldCls}
-          />
-        </div>
-
-        {/* CVV */}
-        <div className="flex flex-col gap-1">
-          <label htmlFor="cc-cvv" className={labelCls}>
-            CVV
-          </label>
-          <input
-            id="cc-cvv"
-            type="text"
-            dir="ltr"
-            placeholder="123"
-            maxLength={4}
-            value={value.cvv}
-            onChange={set("cvv")}
-            className={fieldCls}
-          />
-        </div>
-
-        {/* ID number */}
-        <div className="flex flex-col gap-1">
-          <label htmlFor="cc-id" className={labelCls}>
-            מספר ת"ז
-          </label>
-          <input
-            id="cc-id"
-            type="text"
-            dir="ltr"
-            placeholder="000000000"
-            maxLength={9}
-            value={value.idNumber}
-            onChange={set("idNumber")}
-            className={fieldCls}
-          />
-        </div>
-
-        {/* Cardholder name */}
-        <div className="flex flex-col gap-1">
-          <label htmlFor="cc-name" className={labelCls}>
-            שם בעל הכרטיס
-          </label>
-          <input
-            id="cc-name"
-            type="text"
-            placeholder="ישראל ישראלי"
-            value={value.cardholderName}
-            onChange={set("cardholderName")}
-            className={fieldCls}
-          />
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ─── Donation form ────────────────────────────────────────────────────────────
 
 interface DonationFormProps {
@@ -210,7 +89,6 @@ function DonationForm({ boys, folders, onSaved }: DonationFormProps) {
   // Encoded as "folder:<id>" or "boy:<id>" to distinguish in one <select>
   const [targetValue, setTargetValue] = useState("");
   const [dedication, setDedication] = useState("");
-  const [creditFields, setCreditFields] = useState<CreditFields>(EMPTY_CREDIT);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -264,7 +142,6 @@ function DonationForm({ boys, folders, onSaved }: DonationFormProps) {
       setPaymentType("cash");
       setTargetValue("");
       setDedication("");
-      setCreditFields(EMPTY_CREDIT);
       onSaved();
     } catch (err) {
       console.error("[DonationForm] submit error:", err);
@@ -366,11 +243,6 @@ function DonationForm({ boys, folders, onSaved }: DonationFormProps) {
             />
           </div>
         </div>
-
-        {/* Credit card fields — shown conditionally */}
-        {paymentType === "credit" && (
-          <CreditCardSection value={creditFields} onChange={setCreditFields} />
-        )}
 
         {/* Error banner */}
         {error && (
@@ -661,7 +533,12 @@ export function TransactionsPage() {
       <NedarimPaymentModal
         open={nedarimOpen}
         onClose={() => setNedarimOpen(false)}
-        boys={boys.map((b) => ({ id: b.id, name: b.name }))}
+        boys={boys.map((b) => ({
+          id:          b.id,
+          name:        b.name,
+          nedarimName: b.nedarimName,
+          donorNumber: b.donorNumber,
+        }))}
         onSuccess={(amount, boyName) =>
           showSuccess(
             `תשלום של ₪${amount.toLocaleString("he-IL")} עבור ${boyName} בוצע בהצלחה`
