@@ -91,7 +91,6 @@ export function TickerPage() {
 
   // ── Write handler ───────────────────────────────────────────────────────────
   async function handleUpdate() {
-    if (!draft.trim()) return;
     setSaveState("saving");
     try {
       await setDoc(TICKER_DOC, { message: draft.trim(), updatedAt: serverTimestamp() }, { merge: true });
@@ -114,7 +113,6 @@ export function TickerPage() {
   }
 
   const isDirty  = draft.trim() !== liveMessage;
-  const isEmpty  = !draft.trim();
   const isBusy   = saveState === "saving";
 
   return (
@@ -228,7 +226,7 @@ export function TickerPage() {
           <div className="flex items-center justify-between gap-4 pt-1">
             {/* Dirty indicator */}
             <p className="text-xs text-slate-600">
-              {isDirty && !isEmpty
+              {isDirty
                 ? <span className="text-amber-400 font-semibold">• שינויים לא שמורים</span>
                 : <span>הודעה נוכחית בשידור</span>
               }
@@ -250,7 +248,7 @@ export function TickerPage() {
               <button
                 type="button"
                 onClick={() => void handleUpdate()}
-                disabled={isBusy || isEmpty}
+                disabled={isBusy || !isDirty}
                 className="
                   group relative flex items-center gap-2.5 overflow-hidden
                   rounded-xl px-6 py-2.5 text-sm font-black text-white
@@ -293,7 +291,7 @@ export function TickerPage() {
         <p className="font-bold text-slate-500 uppercase tracking-widest text-[10px] mb-2">מידע טכני</p>
         <p>• Firestore path: <code className="text-cyan-500/80 font-mono">settings / ticker</code> — fields: <code className="text-cyan-500/80 font-mono">message</code>, <code className="text-cyan-500/80 font-mono">showTransactions</code></p>
         <p>• הטיקר על מסך הTV מאזין לשינויים בזמן אמת — אין צורך לרענן</p>
-        <p>• הודעה ריקה לא תישמר</p>
+        <p>• מחיקת הטקסט ולחיצה על "עדכן" תסיר את ההודעה המותאמת מהטיקר</p>
         <p>• מתג "הצג תרומות" נשמר מיידית ומשפיע על השידור בלי ללחוץ שמור</p>
       </div>
 

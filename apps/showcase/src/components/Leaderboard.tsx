@@ -887,7 +887,7 @@ function Ticker({
           return <span key={`${prefix}-tx-${i}`}>{text}{SEP}</span>;
         })}
 
-        {boys.slice(0, 3).map((b, i) => (
+        {showTransactions && boys.slice(0, 3).map((b, i) => (
           <span key={`${prefix}-boy-${b.id}`}>
             {MEDALS[i]} מקום {i + 1}: {b.name} — {nis(b.totalRaised)}{SEP}
           </span>
@@ -898,12 +898,9 @@ function Ticker({
 
   const hasContent =
     customMessage.trim() ||
-    (showTransactions && txs.length > 0) ||
-    boys.length > 0;
+    (showTransactions && (txs.length > 0 || boys.length > 0));
 
-  if (!hasContent) {
-    return <div className="h-10 overflow-hidden border-t border-white/10 bg-gray-900/90" />;
-  }
+  if (!hasContent) return null;
 
   return (
     <div className="h-10 overflow-hidden border-t border-white/10 bg-gray-900/90">
