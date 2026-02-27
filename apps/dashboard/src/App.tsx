@@ -11,6 +11,7 @@ import { BindersPage } from "./pages/BindersPage";
 import { TickerPage } from "./pages/TickerPage";
 import { AddressBankPage } from "./pages/AddressBankPage";
 import { SyncCenterPage } from "./pages/SyncCenterPage";
+import { AlertsPage } from "./pages/AlertsPage";
 import { LoginPage } from "./pages/LoginPage";
 
 /**
@@ -43,6 +44,7 @@ export default function App() {
               <Route path="binders" element={<BindersPage />} />
               <Route path="address-bank" element={<AddressBankPage />} />
               <Route path="ticker" element={<TickerPage />} />
+              <Route path="alerts" element={<AlertsPage />} />
               <Route path="sync-center" element={<SyncCenterPage />} />
               <Route path="settings" element={<SettingsPage />} />
             </Route>
