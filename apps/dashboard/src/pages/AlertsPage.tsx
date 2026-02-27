@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   collection,
   doc,
+  getDoc,
   limit,
   onSnapshot,
   orderBy,
@@ -10,7 +11,8 @@ import {
   setDoc,
   Timestamp,
 } from "firebase/firestore";
-import { clientDb } from "../lib/firebase";
+import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
+import { clientDb, clientStorage } from "../lib/firebase";
 import { useAuth } from "../hooks/useAuth";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -95,16 +97,75 @@ export function AlertsPage() {
   const [displayMode, setDisplayMode] = useState<"text" | "image" | "text_on_image">("text");
   const [duration, setDuration]       = useState(7);
   const [isInfinite, setIsInfinite]   = useState(false);
+  const [uploading, setUploading]     = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [pushing, setPushing]         = useState(false);
   const [killing, setKilling]         = useState(false);
   const [pushResult, setPushResult]   = useState<{ ok: boolean; text: string } | null>(null);
+  const [gallery, setGallery]         = useState<string[]>([]);
   const pushResultTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fileInputRef    = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     return () => {
       if (pushResultTimer.current) clearTimeout(pushResultTimer.current);
     };
   }, []);
+
+  // ── Gallery listener ──────────────────────────────────────────────────────
+  useEffect(() => {
+    const unsub = onSnapshot(
+      doc(clientDb, "settings", "showcase_gallery"),
+      (snap) => {
+        if (snap.exists()) {
+          const data = snap.data() as { recentImages?: string[] };
+          setGallery(data.recentImages ?? []);
+        }
+      },
+      (err) => console.error("[AlertsPage] gallery snapshot error:", err)
+    );
+    return unsub;
+  }, []);
+
+  // ── File upload ───────────────────────────────────────────────────────────
+  async function handleFileUpload(file: File) {
+    setUploading(true);
+    setUploadProgress(0);
+    try {
+      const storageRef = ref(clientStorage, `showcase_uploads/${Date.now()}_${file.name}`);
+      const task = uploadBytesResumable(storageRef, file);
+
+      await new Promise<void>((resolve, reject) => {
+        task.on(
+          "state_changed",
+          (snap) => setUploadProgress(Math.round((snap.bytesTransferred / snap.totalBytes) * 100)),
+          reject,
+          resolve,
+        );
+      });
+
+      const downloadURL = await getDownloadURL(task.snapshot.ref);
+      setImageUrl(downloadURL);
+
+      // Update gallery — append + trim to 10
+      const galleryRef = doc(clientDb, "settings", "showcase_gallery");
+      const gallerySnap = await getDoc(galleryRef);
+      const existing: string[] = gallerySnap.exists()
+        ? ((gallerySnap.data() as { recentImages?: string[] }).recentImages ?? [])
+        : [];
+      const updated = [...existing, downloadURL].slice(-10);
+      await setDoc(galleryRef, { recentImages: updated });
+
+      showFeedback(true, "✓ התמונה הועלתה בהצלחה");
+    } catch (err) {
+      console.error("[AlertsPage] upload error:", err);
+      showFeedback(false, "שגיאה בהעלאת התמונה — נסה שנית");
+    } finally {
+      setUploading(false);
+      setUploadProgress(0);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
 
   function showFeedback(ok: boolean, text: string) {
     setPushResult({ ok, text });
@@ -266,22 +327,125 @@ export function AlertsPage() {
             </div>
           )}
 
-          {/* ── Row 3: Image URL (hidden for text-only) ── */}
+          {/* ── Row 3: Image upload + URL + gallery (hidden for text-only) ── */}
           {displayMode !== "text" && (
-            <div>
-              <label htmlFor="popup-img" className="block mb-1.5 text-[10px] font-bold uppercase tracking-widest text-slate-500">
-                קישור לתמונה
-              </label>
-              <input
-                id="popup-img"
-                type="url"
-                dir="ltr"
-                placeholder="https://..."
-                value={imageUrl}
-                onChange={(e) => setImageUrl(e.target.value)}
-                disabled={pushing}
-                className="w-full rounded-lg bg-slate-800 border border-slate-700 text-white placeholder-slate-500 px-3 py-2.5 text-sm font-mono transition-colors focus:border-purple-500/70 focus:outline-none focus:ring-1 focus:ring-purple-500/25 disabled:opacity-40"
-              />
+            <div className="space-y-3">
+
+              {/* Upload row */}
+              <div className="flex items-center gap-3">
+                {/* Hidden file input */}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*,image/gif"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) void handleFileUpload(file);
+                  }}
+                />
+
+                {/* Upload button */}
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploading || pushing}
+                  className="flex shrink-0 items-center gap-2 rounded-xl border border-slate-600 bg-slate-800 px-4 py-2.5 text-sm font-bold text-slate-300 hover:border-purple-500/50 hover:text-purple-300 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                >
+                  {uploading ? (
+                    <>
+                      <svg className="h-4 w-4 animate-spin text-purple-400" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth={4} />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                      </svg>
+                      {uploadProgress}%
+                    </>
+                  ) : (
+                    <>
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
+                      </svg>
+                      העלה תמונה / GIF
+                    </>
+                  )}
+                </button>
+
+                {/* Manual URL input */}
+                <div className="relative flex-1">
+                  <label htmlFor="popup-img" className="sr-only">קישור לתמונה</label>
+                  <input
+                    id="popup-img"
+                    type="url"
+                    dir="ltr"
+                    placeholder="או הדבק קישור לתמונה..."
+                    value={imageUrl}
+                    onChange={(e) => setImageUrl(e.target.value)}
+                    disabled={uploading || pushing}
+                    className="w-full rounded-lg bg-slate-800 border border-slate-700 text-white placeholder-slate-500 px-3 py-2.5 text-sm font-mono transition-colors focus:border-purple-500/70 focus:outline-none focus:ring-1 focus:ring-purple-500/25 disabled:opacity-40"
+                  />
+                  {imageUrl && (
+                    <button
+                      type="button"
+                      onClick={() => setImageUrl("")}
+                      className="absolute left-2 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors"
+                      aria-label="נקה"
+                    >
+                      <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                      </svg>
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Upload progress bar */}
+              {uploading && (
+                <div className="h-1 w-full overflow-hidden rounded-full bg-slate-700">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-purple-500 to-pink-500 transition-all duration-300"
+                    style={{ width: `${uploadProgress}%` }}
+                  />
+                </div>
+              )}
+
+              {/* Recent gallery */}
+              {gallery.length > 0 && (
+                <div>
+                  <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-slate-500">
+                    גלריית תמונות אחרונות
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {[...gallery].reverse().map((url, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        onClick={() => setImageUrl(url)}
+                        title={url}
+                        className={`relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border-2 transition-all hover:scale-105 focus:outline-none ${
+                          imageUrl === url
+                            ? "border-purple-500 shadow-[0_0_10px_rgba(168,85,247,0.5)]"
+                            : "border-slate-700 hover:border-slate-500"
+                        }`}
+                      >
+                        <img
+                          src={url}
+                          alt=""
+                          className="h-full w-full object-cover"
+                          draggable={false}
+                        />
+                        {imageUrl === url && (
+                          <div className="absolute inset-0 flex items-center justify-center bg-purple-500/20">
+                            <svg className="h-5 w-5 text-white drop-shadow" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
+                            </svg>
+                          </div>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
             </div>
           )}
 
@@ -291,7 +455,7 @@ export function AlertsPage() {
             <button
               type="button"
               onClick={() => void handlePushPopup()}
-              disabled={pushing || killing}
+              disabled={pushing || killing || uploading}
               className="flex items-center gap-2 rounded-xl bg-purple-600 px-5 py-2.5 text-sm font-black text-white shadow-[0_0_16px_rgba(168,85,247,0.3)] hover:bg-purple-500 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
             >
               {pushing ? (
@@ -316,7 +480,7 @@ export function AlertsPage() {
             <button
               type="button"
               onClick={() => void handleKillPopup()}
-              disabled={pushing || killing}
+              disabled={pushing || killing || uploading}
               className="flex items-center gap-2 rounded-xl border border-red-500/40 bg-red-500/10 px-5 py-2.5 text-sm font-black text-red-400 hover:bg-red-500/20 hover:border-red-400/60 disabled:opacity-40 disabled:cursor-not-allowed transition-all"
             >
               {killing ? (
