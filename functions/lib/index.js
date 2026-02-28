@@ -33,13 +33,17 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.healthCheck = exports.processTransactionCancellation = exports.processPendingTransaction = void 0;
+exports.healthCheck = exports.yemotPersonal = exports.yemotGeneral = exports.processTransactionCancellation = exports.processPendingTransaction = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const logger = __importStar(require("firebase-functions/logger"));
 // ─── Financial triggers ───────────────────────────────────────────────────────
 var processTransactions_1 = require("./financial/processTransactions");
 Object.defineProperty(exports, "processPendingTransaction", { enumerable: true, get: function () { return processTransactions_1.processPendingTransaction; } });
 Object.defineProperty(exports, "processTransactionCancellation", { enumerable: true, get: function () { return processTransactions_1.processTransactionCancellation; } });
+// ─── IVR / Yemot HaMashiach webhooks ─────────────────────────────────────────
+var yemotWebhooks_1 = require("./ivr/yemotWebhooks");
+Object.defineProperty(exports, "yemotGeneral", { enumerable: true, get: function () { return yemotWebhooks_1.yemotGeneral; } });
+Object.defineProperty(exports, "yemotPersonal", { enumerable: true, get: function () { return yemotWebhooks_1.yemotPersonal; } });
 // ─── Utility endpoints ────────────────────────────────────────────────────────
 /**
  * Health-check endpoint — confirms the Functions runtime is alive.

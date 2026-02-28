@@ -7,6 +7,9 @@ export {
   processTransactionCancellation,
 } from "./financial/processTransactions";
 
+// ─── IVR / Yemot HaMashiach webhooks ─────────────────────────────────────────
+export { yemotGeneral, yemotPersonal } from "./ivr/yemotWebhooks";
+
 // ─── Utility endpoints ────────────────────────────────────────────────────────
 
 /**

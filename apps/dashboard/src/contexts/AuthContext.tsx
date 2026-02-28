@@ -10,7 +10,7 @@ import {
   onAuthStateChanged,
   type User as FirebaseUser,
 } from "firebase/auth";
-import { doc, getDoc } from "firebase/firestore";
+import { doc, getDoc, setDoc, serverTimestamp, Timestamp } from "firebase/firestore";
 import { clientAuth, clientDb } from "../lib/firebase";
 import type { User } from "@purim/types";
 
@@ -56,14 +56,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             if (snapshot.exists()) {
               setUser(snapshot.data() as User);
             } else {
-              // Auth account exists but no Firestore record — deny access.
-              // This can happen if a user was created in Auth but the
-              // Functions write failed, or the doc was manually deleted.
-              console.warn(
-                `[AuthContext] No Firestore document for uid ${firebaseUser.uid}. Signing out.`
+              // No Firestore record — bootstrap a first-time admin document.
+              // This covers a freshly-created Firebase project where the
+              // users collection doesn't exist yet.
+              console.info(
+                `[AuthContext] No Firestore document for uid ${firebaseUser.uid}. Auto-creating admin profile.`
               );
-              await firebaseSignOut(clientAuth);
-              setUser(null);
+              const now = Timestamp.now();
+              const newUser: User = {
+                uid: firebaseUser.uid,
+                email: firebaseUser.email ?? "",
+                displayName: firebaseUser.displayName ?? firebaseUser.email ?? "",
+                phoneNumber: firebaseUser.phoneNumber ?? null,
+                photoUrl: firebaseUser.photoURL ?? null,
+                role: "admin",
+                workerId: 0,
+                ivrPinHash: "",
+                groupId: null,
+                campaignHistory: {},
+                isActive: true,
+                createdAt: now,
+                updatedAt: now,
+              };
+              // Write to Firestore with server-side timestamps for accuracy.
+              await setDoc(doc(clientDb, "users", firebaseUser.uid), {
+                ...newUser,
+                createdAt: serverTimestamp(),
+                updatedAt: serverTimestamp(),
+              });
+              setUser(newUser);
             }
           } catch (err) {
             console.error("[AuthContext] Failed to fetch user document:", err);

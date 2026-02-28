@@ -7,6 +7,31 @@ import {
   query,
   Timestamp,
 } from "firebase/firestore";
+
+// ─── Single source of truth ───────────────────────────────────────────────────
+//
+// Sums the `amount` of every non-cancelled transaction directly.
+// This never drifts from reality even if the boys.totalRaised denormal
+// field lags (e.g. Cloud Functions haven't processed pending docs yet).
+
+function useAllTimeCampaignTotal(): number {
+  const [total, setTotal] = useState(0);
+  useEffect(() => {
+    return onSnapshot(
+      collection(clientDb, "transactions"),
+      (snap) => {
+        const sum = snap.docs.reduce((s, d) => {
+          const data = d.data();
+          if (data.status === "cancelled") return s;
+          return s + ((data.amount as number) ?? 0);
+        }, 0);
+        setTotal(sum);
+      },
+      (err) => console.error("[useAllTimeCampaignTotal] snapshot error:", err),
+    );
+  }, []);
+  return total;
+}
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from "recharts";
@@ -701,7 +726,8 @@ export function DashboardHomePage() {
   const binders = useBinders();
 
   // ── Quick stats (computed) ────────────────────────────────────────────────
-  const totalRaised = useMemo(() => boys.reduce((s, b) => s + b.totalRaised, 0), [boys]);
+  // totalRaised: use the direct transaction sum — single source of truth.
+  const totalRaised  = useAllTimeCampaignTotal();
   const inFieldCount = useMemo(() => boys.filter((b) => b.status === "in_field").length, [boys]);
   const todayCount   = useMemo(() => {
     const today = new Date().toDateString();

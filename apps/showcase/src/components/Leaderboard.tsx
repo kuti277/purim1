@@ -216,6 +216,28 @@ function useSettings(): { settings: GlobalSettings; loading: boolean } {
  * Listens to settings/ticker in real time.
  * Returns the custom admin message and the showTransactions toggle.
  */
+/**
+ * Single source of truth: loads ALL transactions in real-time.
+ * Per-boy totals and the global campaign total are derived via useMemo
+ * in the Leaderboard root so every child widget always reads the same
+ * consistent numbers — no more per-component fragmented calculations.
+ */
+function useAllTransactions(): { allTxs: Transaction[]; allTxsLoading: boolean } {
+  const [allTxs, setAllTxs]         = useState<Transaction[]>([]);
+  const [allTxsLoading, setLoading] = useState(true);
+  useEffect(() => {
+    return onSnapshot(
+      collection(clientDb, "transactions"),
+      (snap) => {
+        setAllTxs(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Transaction)));
+        setLoading(false);
+      },
+      (err) => console.error("[useAllTransactions] snapshot error:", err),
+    );
+  }, []);
+  return { allTxs, allTxsLoading };
+}
+
 function useTickerSettings(): { message: string; showTransactions: boolean } {
   const [message, setMessage]               = useState("");
   const [showTransactions, setShowTxs]      = useState(true);
@@ -319,11 +341,13 @@ function DailyStarCard({
   dailyTxs,
   hasBomb,
   globalGoal,
+  boyTotals,
 }: {
   boys: Boy[];
   dailyTxs: Transaction[];
   hasBomb: boolean;
   globalGoal: number;
+  boyTotals: Map<string, number>;
 }) {
   const { star, dailyAmt, isDefault } = useMemo(() => {
     if (dailyTxs.length === 0) {
@@ -356,7 +380,9 @@ function DailyStarCard({
   // the global campaign goal so percentages are always meaningful.
   const perBoyGoal = globalGoal > 0 ? Math.round(globalGoal / Math.max(boys.length, 1)) : 0;
   const effectiveGoal = star.goal > 0 ? star.goal : perBoyGoal;
-  const p = pct(star.totalRaised, effectiveGoal);
+  // Use transaction-based total — never the stale denormalized field.
+  const starRaised = boyTotals.get(star.id) ?? 0;
+  const p = pct(starRaised, effectiveGoal);
   const z = Z[getZone(p)];
 
   return (
@@ -397,14 +423,14 @@ function DailyStarCard({
       {/* Daily / total amount */}
       <div className="relative z-10 mt-3 flex items-baseline gap-1.5">
         <span className={`text-2xl font-bold tabular-nums ${z.text}`}>
-          {isDefault ? nis(star.totalRaised) : nis(dailyAmt)}
+          {isDefault ? nis(starRaised) : nis(dailyAmt)}
         </span>
         <span className="text-xs text-white/30">{isDefault ? 'סה"כ' : "היום"}</span>
       </div>
 
       {/* Progress bar */}
       <div className="relative z-10 mt-3 w-full max-w-[200px]">
-        <Bar raised={star.totalRaised} goal={effectiveGoal} cls={z.bar} />
+        <Bar raised={starRaised} goal={effectiveGoal} cls={z.bar} />
         <p className={`mt-1 text-center text-xs tabular-nums ${z.text}`} dir="ltr">
           {p.toFixed(1)}%
         </p>
@@ -440,11 +466,9 @@ function DailyStarCard({
 
 // ─── Header: Campaign Total ──────────────────────────────────────────────────────
 
-function CampaignTotalCard({ boys, globalGoal }: { boys: Boy[]; globalGoal: number }) {
-  const raised = useMemo(
-    () => boys.reduce((s, b) => s + b.totalRaised, 0),
-    [boys],
-  );
+function CampaignTotalCard({ boys, globalGoal, raised }: { boys: Boy[]; globalGoal: number; raised: number }) {
+  // `raised` comes from the parent Leaderboard component (derived from the
+  // centralised transactions snapshot) — never touches boys.totalRaised.
 
   // Use the admin-configured global goal only when it's set AND is at least as
   // large as the sum of all individual boys' goals.  This guards against
@@ -521,12 +545,13 @@ function LegendCard() {
 
 interface ShiurRow { name: string; raised: number; goal: number; count: number }
 
-function ShiurPanel({ boys, coinsShiurNames, globalGoal }: { boys: Boy[]; coinsShiurNames: Set<string>; globalGoal: number }) {
+function ShiurPanel({ boys, coinsShiurNames, globalGoal, boyTotals }: { boys: Boy[]; coinsShiurNames: Set<string>; globalGoal: number; boyTotals: Map<string, number> }) {
   const rows = useMemo<ShiurRow[]>(() => {
     const map = new Map<string, ShiurRow>();
     for (const b of boys) {
       const r = map.get(b.shiur) ?? { name: b.shiur, raised: 0, goal: 0, count: 0 };
-      r.raised += b.totalRaised;
+      // Use transaction-based per-boy total — never the stale Firestore field.
+      r.raised += boyTotals.get(b.id) ?? 0;
       r.goal   += b.goal;
       r.count++;
       map.set(b.shiur, r);
@@ -534,7 +559,7 @@ function ShiurPanel({ boys, coinsShiurNames, globalGoal }: { boys: Boy[]; coinsS
     return [...map.values()]
       .filter((r) => SHIUR_ORDER.includes(r.name))
       .sort((a, b) => b.raised - a.raised);
-  }, [boys]);
+  }, [boys, boyTotals]);
 
   return (
     <Panel title="דירוג שיעורים" icon="🏫" accentBorder="border-violet-500/20">
@@ -613,7 +638,7 @@ function ShiurPanel({ boys, coinsShiurNames, globalGoal }: { boys: Boy[]; coinsS
 // Vertical infinite marquee — same seamless-loop technique as InFieldPanel.
 // `boys` is passed in to calculate 90% target achievement per row.
 
-function TransactionsPanel({ txs, boys }: { txs: Transaction[]; boys: Boy[] }) {
+function TransactionsPanel({ txs, boys, boyTotals }: { txs: Transaction[]; boys: Boy[]; boyTotals: Map<string, number> }) {
   // Tick every 30 s to keep time-ago labels fresh without a Firestore re-read.
   const [, tick] = useState(0);
   useEffect(() => {
@@ -633,9 +658,10 @@ function TransactionsPanel({ txs, boys }: { txs: Transaction[]; boys: Boy[] }) {
 
   // Render a single transaction row. Extracted to avoid JSX duplication.
   function TxRow({ tx, dupKey }: { tx: Transaction; i?: number; dupKey?: string }) {
-    const boy  = boyMap.get(tx.targetId);
-    const is90 = boy != null && pct(boy.totalRaised, boy.goal) >= 90;
-    const bp   = boy ? pct(boy.totalRaised, boy.goal) : 0;
+    const boy       = boyMap.get(tx.targetId);
+    const boyRaised = boyTotals.get(tx.targetId) ?? 0;
+    const is90      = boy != null && pct(boyRaised, boy.goal) >= 90;
+    const bp        = boy ? pct(boyRaised, boy.goal) : 0;
     const z    = boy ? Z[getZone(bp)] : null;
     return (
       <div
@@ -664,7 +690,7 @@ function TransactionsPanel({ txs, boys }: { txs: Transaction[]; boys: Boy[] }) {
           {boy && (
             <>
               <p className={`text-xs tabular-nums ${z ? z.text : "text-white/40"}`}>
-                גייס {nis(boy.totalRaised)} · יעד {nis(boy.goal)}
+                גייס {nis(boyRaised)} · יעד {nis(boy.goal)}
               </p>
               <div className="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-white/10">
                 <div
@@ -785,7 +811,7 @@ function AnnouncementsPanel({
 
 // ─── Left Column — Bottom Half: In-Field Vertical Marquee ────────────────────────
 
-function InFieldPanel({ boys, globalGoal, className = "" }: { boys: Boy[]; globalGoal: number; className?: string }) {
+function InFieldPanel({ boys, globalGoal, className = "", boyTotals }: { boys: Boy[]; globalGoal: number; className?: string; boyTotals: Map<string, number> }) {
   const inField = useMemo(
     () => boys.filter((b) => b.status === "in_field"),
     [boys],
@@ -821,7 +847,7 @@ function InFieldPanel({ boys, globalGoal, className = "" }: { boys: Boy[]; globa
             {inField.map((b) => {
               const perBoy    = globalGoal > 0 ? Math.round(globalGoal / Math.max(boys.length, 1)) : 0;
               const effGoal   = b.goal > 0 ? b.goal : perBoy;
-              const nameColor = Z[getZone(pct(b.totalRaised, effGoal))].text;
+              const nameColor = Z[getZone(pct(boyTotals.get(b.id) ?? 0, effGoal))].text;
               return (
                 <div
                   key={b.id}
@@ -837,7 +863,7 @@ function InFieldPanel({ boys, globalGoal, className = "" }: { boys: Boy[]; globa
             {inField.map((b) => {
               const perBoy    = globalGoal > 0 ? Math.round(globalGoal / Math.max(boys.length, 1)) : 0;
               const effGoal   = b.goal > 0 ? b.goal : perBoy;
-              const nameColor = Z[getZone(pct(b.totalRaised, effGoal))].text;
+              const nameColor = Z[getZone(pct(boyTotals.get(b.id) ?? 0, effGoal))].text;
               return (
                 <div
                   key={`dup-${b.id}`}
@@ -863,11 +889,13 @@ function Ticker({
   txs,
   customMessage,
   showTransactions,
+  boyTotals,
 }: {
   boys: Boy[];
   txs: Transaction[];
   customMessage: string;
   showTransactions: boolean;
+  boyTotals: Map<string, number>;
 }) {
   const SEP = "   ·   ";
 
@@ -889,7 +917,7 @@ function Ticker({
 
         {showTransactions && boys.slice(0, 3).map((b, i) => (
           <span key={`${prefix}-boy-${b.id}`}>
-            {MEDALS[i]} מקום {i + 1}: {b.name} — {nis(b.totalRaised)}{SEP}
+            {MEDALS[i]} מקום {i + 1}: {b.name} — {nis(boyTotals.get(b.id) ?? 0)}{SEP}
           </span>
         ))}
       </>
@@ -931,11 +959,35 @@ function FullScreenSpinner() {
 // ─── Main Export ─────────────────────────────────────────────────────────────────
 
 export function Leaderboard() {
-  const { boys, loading: bl }     = useBoys();
-  const { txs,  loading: tl }     = useRecentTransactions();
-  const dailyTxs                  = useDailyTransactions();
-  const { settings, loading: sl } = useSettings();
+  const { boys, loading: bl }             = useBoys();
+  const { txs,  loading: tl }             = useRecentTransactions();
+  const dailyTxs                          = useDailyTransactions();
+  const { settings, loading: sl }         = useSettings();
   const { message: tickerMessage, showTransactions } = useTickerSettings();
+  // ── Single source of truth: all transactions ────────────────────────────────
+  const { allTxs, allTxsLoading: al }     = useAllTransactions();
+
+  // ── Per-boy totals derived from raw transactions (bypasses stale field) ──────
+  const boyTotals = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const tx of allTxs) {
+      if (tx.status === "cancelled") continue;
+      m.set(tx.targetId, (m.get(tx.targetId) ?? 0) + tx.amount);
+    }
+    return m;
+  }, [allTxs]);
+
+  // ── Global campaign total derived from the same dataset ──────────────────────
+  const globalTotal = useMemo(
+    () => [...boyTotals.values()].reduce((s, v) => s + v, 0),
+    [boyTotals],
+  );
+
+  // ── Boys sorted by their real transaction total (Firestore order may be stale) ─
+  const sortedBoys = useMemo(
+    () => [...boys].sort((a, b) => (boyTotals.get(b.id) ?? 0) - (boyTotals.get(a.id) ?? 0)),
+    [boys, boyTotals],
+  );
 
   // ── Audio refs (three separate players) ──────────────────────────────────────
   const bgMusicRef  = useRef<HTMLAudioElement>(null);
@@ -1093,7 +1145,7 @@ export function Leaderboard() {
       <audio ref={sloganRef}   src="/assets/slogan.mp3"   loop preload="none" />
       <audio ref={applauseRef} src="/assets/applause.mp3"      preload="none" />
 
-      {(bl || tl || sl) ? <FullScreenSpinner /> : (
+      {(bl || tl || sl || al) ? <FullScreenSpinner /> : (
         <>
           <style>{`
             @keyframes ticker-scroll {
@@ -1139,25 +1191,26 @@ export function Leaderboard() {
               {/* Middle slot: DailyStarCard (50%) + LegendCard (50%) */}
               <div className="grid grid-cols-2 gap-4">
                 <DailyStarCard
-                  boys={boys}
+                  boys={sortedBoys}
                   dailyTxs={dailyTxs}
                   hasBomb={bombBoyIds.size > 0}
                   globalGoal={settings.globalGoal}
+                  boyTotals={boyTotals}
                 />
                 <LegendCard />
               </div>
-              <CampaignTotalCard boys={boys} globalGoal={settings.globalGoal} />
+              <CampaignTotalCard boys={boys} globalGoal={settings.globalGoal} raised={globalTotal} />
             </div>
 
             {/* ── Body (3 columns, fills remaining space) ── */}
             <div className="relative z-[1] grid min-h-0 flex-1 grid-cols-[1fr_2fr_1fr] gap-4 px-4 pb-4">
-              <ShiurPanel boys={boys} coinsShiurNames={coinsShiurNames} globalGoal={settings.globalGoal} />
+              <ShiurPanel boys={boys} coinsShiurNames={coinsShiurNames} globalGoal={settings.globalGoal} boyTotals={boyTotals} />
               {/* Center: branding label + recent donors panel */}
               <div className="flex min-h-0 flex-col gap-1.5">
                 <p className="shrink-0 text-center text-[10px] font-medium tracking-widest text-white/20 whitespace-nowrap">
                   קותיס מערכות תקשורת
                 </p>
-                <TransactionsPanel txs={txs} boys={boys} />
+                <TransactionsPanel txs={txs} boys={boys} boyTotals={boyTotals} />
               </div>
 
               {/*
@@ -1169,13 +1222,13 @@ export function Leaderboard() {
                   announcements={settings.announcements}
                   className="flex-1 min-h-0"
                 />
-                <InFieldPanel boys={boys} globalGoal={settings.globalGoal} className="flex-1 min-h-0" />
+                <InFieldPanel boys={boys} globalGoal={settings.globalGoal} className="flex-1 min-h-0" boyTotals={boyTotals} />
               </div>
             </div>
 
             {/* ── Footer: ticker + audio unlock button ── */}
             <div className="relative shrink-0">
-              <Ticker boys={boys} txs={txs} customMessage={tickerMessage} showTransactions={showTransactions} />
+              <Ticker boys={sortedBoys} txs={txs} customMessage={tickerMessage} showTransactions={showTransactions} boyTotals={boyTotals} />
               {/*
                * Audio unlock button — browsers block autoplay until the user
                * interacts with the page. Clicking this unlocks the audio context

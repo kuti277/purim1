@@ -3,7 +3,7 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     match /users/{userId} {
-      allow read: if request.auth != null && request.auth.uid == userId;
+      allow read, write: if request.auth != null && request.auth.uid == userId;
     }
 
     match /folders/{folderId} {
@@ -15,19 +15,21 @@ service cloud.firestore {
     }
 
     match /boys/{boyId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow write: if request.auth != null;
     }
 
     match /addressBank/{docId} {
-      allow read, write: if true;
+      allow read, write: if request.auth != null;
     }
 
     match /addresses/{docId} {
-      allow read, write: if true;
+      allow read, write: if request.auth != null;
     }
 
-    match /settings/{docId} {
-      allow read, write: if request.auth != null;
+    match /settings/{document=**} {
+      allow read: if true;
+      allow write: if request.auth != null;
     }
 
     match /system_alerts/{document=**} {
@@ -40,7 +42,7 @@ service cloud.firestore {
 
     match /transactions/{txId} {
       allow read: if true;
-      allow update: if true;
+      allow write: if request.auth != null;
     }
   }
 }
