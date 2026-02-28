@@ -255,9 +255,53 @@ Clicking "ביטול עסקה" sets `status → 'cancelled'` and decrements each
 ### `@purim/showcase`
 **Path:** `apps/showcase` | **Port:** 5173
 
-An interactive component gallery for the `@purim/ui` design system. Used during development to render and test UI primitives in isolation. Has no Firebase dependency.
+The **live campaign broadcast screen** — a full-screen, RTL, real-time TV display shown on a projector or large monitor during the Purim campaign. Connects directly to Firestore (unauthenticated, public read) and updates live as donations arrive.
 
-**Workspace dependencies:** `@purim/types`, `@purim/utils`, `@purim/ui`
+#### Layout (3-column grid)
+
+| Column | Components |
+|---|---|
+| Right | `ShiurPanel` — class leaderboard sorted by real transaction totals |
+| Centre | `TransactionsPanel` — vertical marquee of the last 10 donations |
+| Left | `AnnouncementsPanel` (top) + `InFieldPanel` — live marquee of boys currently in the field (bottom) |
+
+**Header row (full-width, 3 slots):**
+
+| Slot | Component | Description |
+|---|---|---|
+| Left | `CampaignNameCard` | Logo + campaign name + live indicator |
+| Centre | `DailyStarCard` + `LegendCard` | Top daily fundraiser with photo, confetti GIF, bomb GIF on large donations (>50 ₪), progress bar in zone colour |
+| Right | `CampaignTotalCard` | Global campaign total vs. goal, thick progress bar |
+
+**Footer:** `Ticker` — horizontal news-ticker marquee with admin message + top-3 boys + recent transactions.
+
+#### Key design features
+
+- **Colour zone system** — every name, bar, and ring is coloured by fundraising percentage:
+  - 🔴 Red: 0–25% · 🟡 Yellow: 25–50% · 🟠 Orange: 50–90% · 🟢 Green: ≥90%
+- **Single source of truth** — all totals derived from the `transactions` collection via `useAllTransactions()` hook + `useMemo`. The stale `boys.totalRaised` denormalized field is never used for display. `sortedBoys` is re-computed client-side from transaction sums.
+- **GIF overlays** — `donation.gif` (5 s, full-screen) + `coins.gif` (5 s, per shiur row) + `bomb.gif` (30 s, over daily star) + `target90.gif` (inline badge, ≥90% goal)
+- **Audio** — background music (remote URL from Firestore), slogan jingle (`/assets/slogan.mp3`, ducks BG to 20%), applause on each new donation (`/assets/applause.mp3`)
+- **Popup overlay** — `ShowcasePopupOverlay` listens to `settings/showcase_popup` in real time; supports text / image / text-on-image modes with CSS animations and progress bar
+- **Admin controls** (from Dashboard → Alerts page): push popup, set display mode/duration, upload images to Firebase Storage gallery, pick random image, toggle infinite mode
+
+**Firestore collections read (all public):** `boys`, `transactions`, `settings/{global,ticker,showcase_popup,showcase_gallery}`, (unauthenticated access)
+
+**Public assets expected at `apps/showcase/public/assets/`:**
+
+| File | Purpose |
+|---|---|
+| `logo.png` | Campaign name card logo |
+| `leizan.png` | Daily star profile picture |
+| `slogan.mp3` | Campaign jingle (looped when `playSlogan=true`) |
+| `applause.mp3` | Plays on every new incoming donation |
+| `donation.gif` | 5 s full-screen overlay on any new transaction |
+| `coins.gif` | 5 s overlay over a shiur row on new transaction |
+| `bomb.gif` | 30 s overlay on daily star card for donations > 50 ₪ |
+| `target90.gif` | Inline 24×24 badge on transaction rows when boy ≥ 90% goal |
+| `confetti.gif` | Permanent background on daily star card and leading shiur row |
+
+**Workspace dependencies:** `@purim/firebase-config`
 
 ---
 
@@ -367,11 +411,14 @@ Firebase Cloud Functions v2 backend, compiled from TypeScript to CommonJS for th
 | `functions/src/index.ts` | Entry point — exports all functions |
 | `functions/src/lib/admin.ts` | Admin SDK singleton — `initializeApp()` guard + exports `db` |
 | `functions/src/financial/processTransactions.ts` | Donation processing and cancellation triggers |
+| `functions/src/ivr/yemotWebhooks.ts` | Yemot HaMashiach IVR HTTP endpoints |
 | `functions/tsconfig.json` | CommonJS + Node 20 target; `outDir: lib` |
 | `firebase.json` | Hosting (3 sites), Functions source, Emulator ports |
-| `firestore.rules` | Security rules — **deny-all** scaffold |
-| `firestore.indexes.json` | Composite index definitions (empty scaffold) |
-| `storage.rules` | Storage security rules — **deny-all** scaffold |
+| `firestore.rules` | Security rules — public read on `boys`, `transactions`, `settings`; authenticated write |
+| `firestore.indexes.json` | Composite index definitions |
+| `storage.rules` | Firebase Storage security rules |
+
+> **Deployment note:** `@purim/types` is intentionally **not** listed as a dependency of `functions/`. All types needed by Cloud Functions are defined locally inside each source file. This is required because Google Cloud Build receives only the standalone `functions/` directory and cannot resolve `workspace:*` monorepo references.
 
 ### Cloud Function Triggers
 
@@ -403,6 +450,27 @@ Fires on any update to a `transactions` document. Only acts when `before.status 
 
 All financial logic (split math, `totalRaised` updates) runs exclusively in these Cloud Functions. The client writes only intent documents (`pending_transactions`) and status signals (`request_cancel`) — it never performs arithmetic or touches `boys` documents directly.
 
+#### `yemotGeneral`
+**Trigger:** `onRequest` (HTTP GET/POST) — `cors: true`
+
+Called by the Yemot HaMashiach PBX to read out the global campaign status over the phone. Reads `settings/global.globalGoal`, sums all non-cancelled transactions, and returns a Yemot `id_list_message` TTS response with goal, raised, remaining, donor count, and percentage.
+
+#### `yemotPersonal` (two-step DTMF flow)
+**Trigger:** `onRequest` (HTTP GET/POST) — `cors: true`
+
+**Step A — no `WorkerId` present:** Returns a `read=` command prompting the caller to dial their donor number (max 10 digits, 1 min, 7 s timeout, 14 retries).
+
+```
+read=t-WorkerId=tts,שלום מתרים נא להקיש מספר מתרים וסולמית,no,10,1,7,14,none
+```
+
+**Step B — `WorkerId` received:** Queries `boys` where `donorNumber == WorkerId`. Returns a personalised TTS message with name, shiur, collected amount, goal, and remaining. Checks `t-WorkerId`, `WorkerId`, and `tts` keys in both query-string and POST body to handle PBX firmware variations.
+
+#### `healthCheck`
+**Trigger:** `onRequest` (HTTP GET)
+
+Returns `{ status: "ok", timestamp: "<ISO string>" }`. Used to confirm the Functions runtime is alive after a deploy.
+
 ### Firebase Emulator Suite
 
 Run the full Firebase stack locally without touching production:
@@ -432,9 +500,21 @@ Each app maps to a named hosting target defined in `firebase.json`. All SPAs use
 
 | Target | Dist folder | Site |
 |---|---|---|
-| `showcase` | `apps/showcase/dist` | showcase.\<project\>.web.app |
-| `dashboard` | `apps/dashboard/dist` | dashboard.\<project\>.web.app |
-| `ivr-admin` | `apps/ivr-admin/dist` | ivr-admin.\<project\>.web.app |
+| `showcase` | `apps/showcase/dist` | showcase.kuti-purim.web.app |
+| `dashboard` | `apps/dashboard/dist` | dashboard.kuti-purim.web.app |
+| `ivr-admin` | `apps/ivr-admin/dist` | ivr-admin.kuti-purim.web.app |
+
+### Live Firebase Project
+
+| Field | Value |
+|---|---|
+| **Project ID** | `kuti-purim` |
+| **Auth domain** | `kuti-purim.firebaseapp.com` |
+| **Storage bucket** | `kuti-purim.firebasestorage.app` |
+| **Functions region** | `us-central1` (default) |
+| **Functions runtime** | Node 20 |
+
+Production credentials are stored in `apps/showcase/.env.local` and `apps/dashboard/.env.local` (not committed). Set `VITE_USE_FIREBASE_EMULATOR=false` to use the live project.
 
 ---
 
@@ -464,12 +544,75 @@ Each app maps to a named hosting target defined in `firebase.json`. All SPAs use
 
 | Collection | Key fields | Notes |
 |---|---|---|
-| `users` | `uid`, `role`, `displayName`, `workerId`, `ivrPinHash` | Mirrors Firebase Auth UID as document ID |
+| `users` | `uid`, `email`, `displayName`, `role`, `workerId`, `ivrPinHash`, `isActive` | Document ID = Firebase Auth UID. First login auto-creates an `admin` document if none exists. |
 | `folders` | `status`, `phoneNumber` | `status`: `new \| released \| finished` |
-| `boys` | `name`, `shiur`, `status`, `folderId`, `totalRaised` | `status`: `in_field \| finished \| not_out` |
-| `transactions` | `type`, `amount`, `targetId`, `targetType`, `targetName`, `dedication`, `date`, `status`, `splitDetails[]` | `status`: `completed \| cancelled` |
+| `boys` | `name`, `shiur`, `status`, `folderId`, `totalRaised`, `goal`, `donorNumber` | `status`: `in_field \| finished \| not_out`. `totalRaised` is a denormalized field incremented by Cloud Functions — **never used as the display source of truth** (Showcase reads directly from `transactions`). |
+| `transactions` | `type`, `amount`, `targetId`, `targetType`, `targetName`, `dedication`, `date`, `status`, `splitDetails[]` | `status`: `completed \| cancelled \| request_cancel`. `splitDetails` stores exact per-boy shares for atomic reversal. |
+| `pending_transactions` | `amount`, `type`, `targetId`, `targetType`, `targetName`, `dedication`, `date`, `status` | Written by Dashboard donation form; consumed and deleted by `processPendingTransaction`. Public `create` access. |
+| `settings/global` | `campaignName`, `globalGoal`, `announcements[]`, `audioUrl`, `audioVolume`, `audioPlaying`, `playSlogan` | Singleton doc. Public read. |
+| `settings/ticker` | `message`, `showTransactions` | Controls the Showcase footer ticker. Public read. |
+| `settings/showcase_popup` | `isActive`, `mode`, `text`, `imageUrl`, `duration`, `infinite`, `pushKey`, `updatedAt` | Controls the full-screen overlay on the Showcase. Public read. |
+| `settings/showcase_gallery` | `urls[]` | Up to 10 recently uploaded image URLs for the popup gallery. Public read. |
+| `system_alerts` | (document per alert) | Authenticated read/write only. |
 
 Monetary amounts are stored in **NIS** in the `transactions` collection. All writes that span multiple documents (e.g. donation + boy `totalRaised` updates) use Firestore `writeBatch` for atomicity.
+
+---
+
+## Deployment Status
+
+| Component | Status | Notes |
+|---|---|---|
+| Firebase project `kuti-purim` | ✅ Live | Auth, Firestore, Storage, Functions all active |
+| Cloud Functions | ✅ Deployed | `processPendingTransaction`, `processTransactionCancellation`, `yemotGeneral`, `yemotPersonal`, `healthCheck` |
+| Yemot HaMashiach IVR | ✅ Configured | Two-step DTMF flow for personal status; general campaign status endpoint |
+| Firestore security rules | ✅ Deployed | Public read on showcase collections; authenticated write |
+| Dashboard frontend | ⏳ Pending | Not yet deployed — needs Vercel (or Firebase Hosting) setup |
+| Showcase frontend | ⏳ Pending | Not yet deployed — needs Vercel (or Firebase Hosting) setup |
+
+---
+
+## Pending Work
+
+### Infrastructure
+
+#### Frontend Deployment — Vercel
+The frontend apps (`dashboard`, `showcase`) are not yet deployed to a public URL. Recommended approach:
+
+1. Import the monorepo into [vercel.com](https://vercel.com).
+2. Configure each app as a separate Vercel project pointing to its `apps/<name>` subdirectory.
+3. Set build command: `pnpm --filter @purim/<name> build`
+4. Set output directory: `apps/<name>/dist`
+5. Add all `VITE_FIREBASE_*` environment variables in the Vercel dashboard.
+
+---
+
+### Backend (Cloud Functions)
+
+#### Nedarim Plus — Incoming Donation Webhook
+**Not yet built.** When a donor completes a payment on the Nedarim Plus platform, Nedarim sends an HTTP POST to a webhook URL. This function must:
+
+1. Parse the POST body — extract `Amount`, `Comments` or `TashlumDesc` (for the הקדשה/dedication), and the worker identifier.
+2. Verify a shared secret / token to reject spoofed requests.
+3. Resolve the target boy from the worker identifier.
+4. Write a `pending_transactions` document (or directly to `transactions`) using the same split logic as `processPendingTransaction`.
+5. Increment the relevant boys' `totalRaised` atomically.
+
+**Key fields expected from Nedarim Plus POST:**
+
+| Nedarim Field | Maps to |
+|---|---|
+| `Amount` | `transaction.amount` |
+| `Comments` / `TashlumDesc` | `transaction.dedication` (הקדשה) |
+| Worker ID field (TBD) | `boys.donorNumber` lookup |
+
+#### Nedarim Plus — Cancellation / Reversal API
+**Not yet built.** When a coordinator cancels a Nedarim-originated transaction, the system must:
+
+1. Detect that the transaction originated from Nedarim (e.g. `transaction.source === 'nedarim'`).
+2. Iterate over `splitDetails` to know each worker's exact share.
+3. For each worker in the split, call the Nedarim Plus API with a **negative amount** equal to their share, referencing the original transaction ID — so each worker's Nedarim record is balanced correctly.
+4. Only after all API calls succeed, flip `transaction.status` to `'cancelled'` and decrement `boys.totalRaised`.
 
 ---
 
