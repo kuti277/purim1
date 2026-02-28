@@ -1,4 +1,3 @@
-/// <reference types="vite/client" />
 import { clientAuth, clientDb, clientStorage } from "@purim/firebase-config";
 import { connectAuthEmulator } from "firebase/auth";
 import { connectFirestoreEmulator } from "firebase/firestore";
@@ -17,8 +16,11 @@ declare global {
   }
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const useEmulator = (import.meta as any).env?.VITE_USE_FIREBASE_EMULATOR === "true";
+
 if (
-  import.meta.env.VITE_USE_FIREBASE_EMULATOR === "true" &&
+  useEmulator &&
   !window.__PURIM_EMULATORS_CONNECTED__
 ) {
   connectAuthEmulator(clientAuth, "http://127.0.0.1:9099", {

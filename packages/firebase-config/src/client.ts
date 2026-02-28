@@ -1,8 +1,10 @@
-/// <reference types="vite/client" />
 import { initializeApp, getApps, getApp, type FirebaseApp } from "firebase/app";
 import { getAuth, type Auth } from "firebase/auth";
 import { getFirestore, type Firestore } from "firebase/firestore";
 import { getStorage, type FirebaseStorage } from "firebase/storage";
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const env = (import.meta as any).env as Record<string, string>;
 
 /**
  * Firebase client configuration built from Vite environment variables.
@@ -14,12 +16,12 @@ import { getStorage, type FirebaseStorage } from "firebase/storage";
  * Copy apps/<app-name>/.env.example → .env.local and fill in your values.
  */
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY as string,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN as string,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID as string,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET as string,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID as string,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID as string,
+  apiKey:            env["VITE_FIREBASE_API_KEY"],
+  authDomain:        env["VITE_FIREBASE_AUTH_DOMAIN"],
+  projectId:         env["VITE_FIREBASE_PROJECT_ID"],
+  storageBucket:     env["VITE_FIREBASE_STORAGE_BUCKET"],
+  messagingSenderId: env["VITE_FIREBASE_MESSAGING_SENDER_ID"],
+  appId:             env["VITE_FIREBASE_APP_ID"],
 };
 
 /**
