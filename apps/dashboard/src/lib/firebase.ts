@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 import { clientAuth, clientDb, clientStorage } from "@purim/firebase-config";
 import { connectAuthEmulator } from "firebase/auth";
 import { connectFirestoreEmulator } from "firebase/firestore";
