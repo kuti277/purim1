@@ -20,7 +20,11 @@ export interface BoyOption {
    * Falls back to `name` when absent.
    */
   nedarimName?: string;
-  /** Donor number — stored on the Firestore record for cross-referencing */
+  /**
+   * Donor/collector number — same as `MatrimId` in the Nedarim API.
+   * Sent as `MatrimId` in the postMessage so Nedarim can attribute the
+   * payment to the correct collector record on their side.
+   */
   donorNumber?: string;
 }
 
@@ -229,9 +233,11 @@ export function NedarimPaymentModal({
 
     setPaying(true);
 
-    // Param1 = resolved Nedarim attribution name for precise collector mapping.
-    // Comment = dedication / free text (Nedarim's native Comment field).
-    const payload = {
+    // Param1  = resolved Nedarim attribution name for precise collector mapping.
+    // MatrimId = donorNumber (collector's Nedarim ID) — allows Nedarim to link
+    //            the payment to the correct collector record on their system.
+    // Comment  = dedication / free text (Nedarim's native Comment field).
+    const payload: Record<string, string> = {
       Action:      "לשלם",
       Mosad:       mosad,
       ApiValid:    apiValid,
@@ -241,6 +247,9 @@ export function NedarimPaymentModal({
       Param1:      resolvedParam1,
       Comment:     comment.trim(),
     };
+    if (selectedBoy?.donorNumber) {
+      payload["MatrimId"] = selectedBoy.donorNumber;
+    }
 
     iframeRef.current?.contentWindow?.postMessage(
       JSON.stringify(payload),

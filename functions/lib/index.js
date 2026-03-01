@@ -88,10 +88,23 @@ exports.syncNedarimTransactions = (0, scheduler_1.onSchedule)("every 5 minutes",
                 maxId = currentTxId;
             }
             const amount = parseFloat(tx.Amount);
-            const nedarimClientName = tx.ClientName;
-            if (isNaN(amount) || !nedarimClientName)
+            // ClientName = boy's nedarimName for MatchingOffline transactions.
+            // Param1     = boy's nedarimName for iframe (PostNedarim) transactions
+            //              where ClientName holds the human donor's name instead.
+            // Try ClientName first; fall back to Param1 so both flows are caught.
+            const candidateNames = [];
+            if (tx.ClientName)
+                candidateNames.push(String(tx.ClientName));
+            if (tx.Param1 && tx.Param1 !== tx.ClientName)
+                candidateNames.push(String(tx.Param1));
+            if (isNaN(amount) || candidateNames.length === 0)
                 continue;
-            const boysQuery = await db.collection("boys").where("nedarimName", "==", nedarimClientName).get();
+            // Try each candidate name until we find a matching boy
+            let boysQuery = await db.collection("boys").where("nedarimName", "==", candidateNames[0]).get();
+            if (boysQuery.empty && candidateNames[1]) {
+                boysQuery = await db.collection("boys").where("nedarimName", "==", candidateNames[1]).get();
+            }
+            const nedarimClientName = candidateNames[0]; // used for logging/storage
             if (!boysQuery.empty) {
                 const boyDoc = boysQuery.docs[0];
                 // Increment the boy's running total

@@ -36,8 +36,7 @@ interface BoyDoc {
   folderId: string;
   totalRaised: number;
   nedarimName?: string;
-  donorNumber?: string;
-  matrimId?: string;
+  donorNumber?: string;   // same as MatrimId in the Nedarim API
 }
 
 interface FolderDoc {
@@ -456,15 +455,15 @@ function ManualNedarimUpdate({ boys, onSuccess }: ManualNedarimUpdateProps) {
       setError("יש לבחור ילד מהרשימה");
       return;
     }
-    if (!boy.matrimId) {
-      setError(`לילד "${boy.name}" לא הוגדר MatrimId — עדכן אותו תחילה בניהול ילדים`);
+    if (!boy.donorNumber) {
+      setError(`לילד "${boy.name}" לא הוגדר מספר מתרים — עדכן אותו תחילה בניהול ילדים`);
       return;
     }
 
     setSubmitting(true);
     try {
       const result = await pushFn({
-        matrimId:   boy.matrimId,
+        matrimId:   boy.donorNumber,   // donorNumber == MatrimId in Nedarim API
         clientName: boy.nedarimName ?? boy.name,
         amount:     parsedAmount * direction,
       });
@@ -505,12 +504,12 @@ function ManualNedarimUpdate({ boys, onSuccess }: ManualNedarimUpdateProps) {
               <option key={b.id} value={b.id}>
                 {b.name}
                 {b.nedarimName && b.nedarimName !== b.name ? ` (${b.nedarimName})` : ""}
-                {!b.matrimId ? " ⚠️" : ""}
+                {!b.donorNumber ? " ⚠️" : ""}
               </option>
             ))}
           </select>
-          {selectedBoyId && !boys.find((b) => b.id === selectedBoyId)?.matrimId && (
-            <p className="text-[11px] text-amber-600">חסר MatrimId — נדרים לא יוכל לשייך את הסכום</p>
+          {selectedBoyId && !boys.find((b) => b.id === selectedBoyId)?.donorNumber && (
+            <p className="text-[11px] text-amber-600">חסר מספר מתרים — עדכן אותו בניהול ילדים</p>
           )}
         </div>
 
