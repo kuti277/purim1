@@ -509,7 +509,14 @@ export function NedarimPaymentModal({
             </div>
             <iframe
               ref={iframeRef}
-              src="https://www.matara.pro/nedarimplus/iframe/"
+              src={(() => {
+                const base = "https://www.matara.pro/nedarimplus/iframe/";
+                if (!selectedBoy) return base;
+                const p = new URLSearchParams();
+                p.set("Param1", selectedBoy.nedarimName?.trim() || selectedBoy.name);
+                if (selectedBoy.donorNumber) p.set("Param2", selectedBoy.donorNumber);
+                return `${base}?${p.toString()}`;
+              })()}
               title="נדרים פלוס — הזנת כרטיס אשראי מאובטחת"
               className="h-96 w-full flex-1 border-0"
               sandbox="allow-forms allow-scripts allow-same-origin allow-popups"

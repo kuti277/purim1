@@ -79,6 +79,10 @@ exports.syncNedarimTransactions = (0, scheduler_1.onSchedule)("every 5 minutes",
             console.log("No new transactions or error from Nedarim");
             return;
         }
+        // ── Fetch ALL boys once — avoids N Firestore reads inside the loop ────────
+        const boysSnap = await db.collection("boys").get();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const allBoys = boysSnap.docs.map((d) => ({ ref: d.ref, ...d.data() }));
         const batch = db.batch();
         let maxId = lastId;
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -88,36 +92,41 @@ exports.syncNedarimTransactions = (0, scheduler_1.onSchedule)("every 5 minutes",
                 maxId = currentTxId;
             }
             const amount = parseFloat(tx.Amount);
-            // ClientName = boy's nedarimName for MatchingOffline transactions.
-            // Param1     = boy's nedarimName for iframe (PostNedarim) transactions
-            //              where ClientName holds the human donor's name instead.
-            // Try ClientName first; fall back to Param1 so both flows are caught.
-            const candidateNames = [];
-            if (tx.ClientName)
-                candidateNames.push(String(tx.ClientName));
-            if (tx.Param1 && tx.Param1 !== tx.ClientName)
-                candidateNames.push(String(tx.Param1));
-            if (isNaN(amount) || candidateNames.length === 0)
+            if (isNaN(amount))
                 continue;
-            // Try each candidate name until we find a matching boy
-            let boysQuery = await db.collection("boys").where("nedarimName", "==", candidateNames[0]).get();
-            if (boysQuery.empty && candidateNames[1]) {
-                boysQuery = await db.collection("boys").where("nedarimName", "==", candidateNames[1]).get();
-            }
-            const nedarimClientName = candidateNames[0]; // used for logging/storage
-            if (!boysQuery.empty) {
-                const boyDoc = boysQuery.docs[0];
+            // ── Match fundraiser from transaction fields ─────────────────────
+            // IMPORTANT: tx.ClientName = the DONOR's name (person who paid).
+            //            The fundraiser identifier is stored in Param1/Param2/Comments.
+            //
+            //  • MatchingOffline flow: MatrimId = nedarimName → Nedarim echoes it in Param1
+            //  • Iframe (PostNedarim) flow: Param1 = nedarimName, Param2 = donorNumber
+            //  • Comments may also contain the nedarimName as a fallback
+            const txParam1 = String(tx.Param1 ?? "").trim();
+            const txParam2 = String(tx.Param2 ?? "").trim();
+            const txComments = String(tx.Comments ?? "").trim();
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const matchedBoy = allBoys.find((b) => {
+                const name = String(b.nedarimName ?? "").trim();
+                const donor = String(b.donorNumber ?? "").trim();
+                if (!name && !donor)
+                    return false;
+                return ((name && (txParam1 === name || txParam2 === name || txComments.includes(name))) ||
+                    (donor && (txParam1 === donor || txParam2 === donor)));
+            });
+            if (matchedBoy) {
                 // Increment the boy's running total
-                batch.update(boyDoc.ref, {
+                batch.update(matchedBoy.ref, {
                     totalRaised: admin.firestore.FieldValue.increment(amount),
                 });
-                // Persist the transaction record (idempotent — uses TransactionId as doc ID)
+                // Persist transaction (idempotent — TransactionId as doc ID)
                 batch.set(db.collection("transactions").doc(String(currentTxId)), {
                     nedarimTransactionId: currentTxId,
-                    boyId: boyDoc.id,
-                    boyName: boyDoc.data().name ?? nedarimClientName,
+                    boyId: matchedBoy.ref.id,
+                    boyName: matchedBoy.name ?? txParam1,
                     amount,
-                    clientName: nedarimClientName,
+                    donorName: String(tx.ClientName ?? ""),
+                    param1: txParam1,
+                    param2: txParam2,
                     rawData: tx,
                     status: "completed",
                     source: "nedarim",
@@ -125,10 +134,12 @@ exports.syncNedarimTransactions = (0, scheduler_1.onSchedule)("every 5 minutes",
                 }, { merge: true });
             }
             else {
-                // No boy matched — park the transaction for manual resolution
+                // No boy matched — park for manual resolution
                 batch.set(db.collection("unmatched_transactions").doc(String(currentTxId)), {
                     nedarimTransactionId: currentTxId,
-                    clientName: nedarimClientName,
+                    donorName: String(tx.ClientName ?? ""),
+                    param1: txParam1,
+                    param2: txParam2,
                     amount,
                     rawData: tx,
                     status: "pending_match",
@@ -151,9 +162,9 @@ exports.syncNedarimTransactions = (0, scheduler_1.onSchedule)("every 5 minutes",
 // Callable from the Dashboard frontend — proxies to the Nedarim MatchingOffline
 // endpoint so that credentials never leave the server and CORS is avoided.
 exports.pushOfflineDonationToNedarim = (0, https_1.onCall)(async (request) => {
-    const { matrimId, clientName, amount } = request.data;
-    if (!matrimId || !clientName || amount === undefined || amount === null) {
-        throw new https_1.HttpsError("invalid-argument", "Missing required parameters: matrimId, clientName, amount");
+    const { nedarimName, donorName, amount } = request.data;
+    if (!nedarimName || amount === undefined || amount === null) {
+        throw new https_1.HttpsError("invalid-argument", "Missing required parameters: nedarimName, amount");
     }
     const mosadId = process.env.NEDARIM_MOSAD_ID;
     const apiPassword = process.env.NEDARIM_API_PASSWORD;
@@ -164,8 +175,8 @@ exports.pushOfflineDonationToNedarim = (0, https_1.onCall)(async (request) => {
         Action: "MatchingOffline",
         MosadNumber: mosadId,
         ApiPassword: apiPassword,
-        MatrimId: String(matrimId),
-        ClientName: clientName,
+        MatrimId: nedarimName, // fundraiser name, not numeric ID
+        ClientName: donorName?.trim() || "Offline Donation",
         Amount: String(amount),
     });
     const url = `https://matara.pro/nedarimplus/Reports/Manage3.aspx?${params.toString()}`;

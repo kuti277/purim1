@@ -455,17 +455,16 @@ function ManualNedarimUpdate({ boys, onSuccess }: ManualNedarimUpdateProps) {
       setError("יש לבחור ילד מהרשימה");
       return;
     }
-    if (!boy.donorNumber) {
-      setError(`לילד "${boy.name}" לא הוגדר מספר מתרים — עדכן אותו תחילה בניהול ילדים`);
+    if (!boy.nedarimName) {
+      setError(`לילד "${boy.name}" לא הוגדר שם נדרים — עדכן אותו תחילה בניהול ילדים`);
       return;
     }
 
     setSubmitting(true);
     try {
       const result = await pushFn({
-        matrimId:   boy.donorNumber,   // donorNumber == MatrimId in Nedarim API
-        clientName: boy.nedarimName ?? boy.name,
-        amount:     parsedAmount * direction,
+        nedarimName: boy.nedarimName,   // sent as MatrimId (name-based, safer than numeric)
+        amount:      parsedAmount * direction,
       });
       const data = result.data as Record<string, unknown>;
       // Nedarim returns Status:"Success" on success
@@ -504,12 +503,12 @@ function ManualNedarimUpdate({ boys, onSuccess }: ManualNedarimUpdateProps) {
               <option key={b.id} value={b.id}>
                 {b.name}
                 {b.nedarimName && b.nedarimName !== b.name ? ` (${b.nedarimName})` : ""}
-                {!b.donorNumber ? " ⚠️" : ""}
+                {!b.nedarimName ? " ⚠️" : ""}
               </option>
             ))}
           </select>
-          {selectedBoyId && !boys.find((b) => b.id === selectedBoyId)?.donorNumber && (
-            <p className="text-[11px] text-amber-600">חסר מספר מתרים — עדכן אותו בניהול ילדים</p>
+          {selectedBoyId && !boys.find((b) => b.id === selectedBoyId)?.nedarimName && (
+            <p className="text-[11px] text-amber-600">חסר שם נדרים — עדכן אותו בניהול ילדים</p>
           )}
         </div>
 
