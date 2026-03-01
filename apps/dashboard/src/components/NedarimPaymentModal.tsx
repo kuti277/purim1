@@ -237,6 +237,10 @@ export function NedarimPaymentModal({
     // MatrimId = donorNumber (collector's Nedarim ID) — allows Nedarim to link
     //            the payment to the correct collector record on their system.
     // Comment  = dedication / free text (Nedarim's native Comment field).
+    // Comment/Comments is set to the boy's nedarimName so that when Nedarim
+    // stores this transaction, GetHistoryJson returns it with Comments containing
+    // the fundraiser name — which is what the cron's matching logic reads.
+    const fundraiserLabel = resolvedParam1 || selectedBoy?.name || "";
     const payload: Record<string, string> = {
       Action:      "לשלם",
       Mosad:       mosad,
@@ -244,8 +248,8 @@ export function NedarimPaymentModal({
       Amount:      String(parsedAmount),
       ClientName:  clientName.trim(),
       PaymentType: "Ragil",
-      Param1:      resolvedParam1,
-      Comment:     comment.trim(),
+      Param1:      fundraiserLabel,   // kept for forward-compat
+      Comment:     fundraiserLabel,   // Nedarim stores this in the Comments field
     };
     if (selectedBoy?.donorNumber) {
       payload["MatrimId"] = selectedBoy.donorNumber;
@@ -510,11 +514,16 @@ export function NedarimPaymentModal({
             <iframe
               ref={iframeRef}
               src={(() => {
+                // Confirmed from live API: Param1/Param2 are NEVER returned by
+                // GetHistoryJson. The only field Nedarim reliably populates is
+                // Comments. Pass nedarimName as Comments so the cron's
+                // Comments.includes(nedarimName) match catches these payments.
                 const base = "https://www.matara.pro/nedarimplus/iframe/";
                 if (!selectedBoy) return base;
                 const p = new URLSearchParams();
-                p.set("Param1", selectedBoy.nedarimName?.trim() || selectedBoy.name);
-                if (selectedBoy.donorNumber) p.set("Param2", selectedBoy.donorNumber);
+                const label = selectedBoy.nedarimName?.trim() || selectedBoy.name;
+                p.set("Comments", label);
+                p.set("Param1",   label);  // kept for forward-compat with any Nedarim config change
                 return `${base}?${p.toString()}`;
               })()}
               title="נדרים פלוס — הזנת כרטיס אשראי מאובטחת"

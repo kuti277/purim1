@@ -36,7 +36,10 @@ export const syncNedarimTransactions = onSchedule("every 5 minutes", async (_eve
         const syncDocRef = db.collection("system").doc("nedarim_sync");
         const syncDoc = await syncDocRef.get();
 
-        let lastId = 66973930;
+        // Default seed: 40_000_000 is safely below the March 2025 transaction IDs
+        // (~49M) seen in production. Override by writing lastId to the
+        // system/nedarim_sync Firestore document.
+        let lastId = 40_000_000;
         if (syncDoc.exists && syncDoc.data()?.lastId) {
             lastId = syncDoc.data()?.lastId;
         }
@@ -73,26 +76,25 @@ export const syncNedarimTransactions = onSchedule("every 5 minutes", async (_eve
             const amount = parseFloat(tx.Amount);
             if (isNaN(amount)) continue;
 
-            // ── Match fundraiser from transaction fields ─────────────────────
-            // IMPORTANT: tx.ClientName = the DONOR's name (person who paid).
-            //            The fundraiser identifier is stored in Param1/Param2/Comments.
+            // ── Match fundraiser via Comments (the ONLY reliable field) ─────────
             //
-            //  • MatchingOffline flow: MatrimId = nedarimName → Nedarim echoes it in Param1
-            //  • Iframe (PostNedarim) flow: Param1 = nedarimName, Param2 = donorNumber
-            //  • Comments may also contain the nedarimName as a fallback
-            const txParam1    = String(tx.Param1    ?? "").trim();
-            const txParam2    = String(tx.Param2    ?? "").trim();
-            const txComments  = String(tx.Comments  ?? "").trim();
+            // Confirmed from live API output (test-nedarim.ts):
+            //   • tx.Param1, tx.Param2, tx.MatrimId → ALWAYS EMPTY in GetHistoryJson
+            //   • tx.ClientName                     → DONOR name, never the fundraiser
+            //   • tx.Comments                       → free-text set by operator,
+            //                                         e.g. "לזכות המתרים אברהם ליכט"
+            //
+            // Matching rule: boy.nedarimName must be a substring of tx.Comments.
+            // Set boy.nedarimName to the shortest distinctive part of their name
+            // that appears consistently (e.g. "ליכט" rather than "הבחור החשוב ליכט").
+            const txComments = String(tx.Comments ?? "").trim();
+            const donorName  = String(tx.ClientName ?? "").trim();
 
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const matchedBoy = allBoys.find((b: any) => {
-                const name   = String(b.nedarimName   ?? "").trim();
-                const donor  = String(b.donorNumber   ?? "").trim();
-                if (!name && !donor) return false;
-                return (
-                    (name   && (txParam1 === name   || txParam2 === name   || txComments.includes(name)))   ||
-                    (donor  && (txParam1 === donor  || txParam2 === donor))
-                );
+                const name = String(b.nedarimName ?? "").trim();
+                if (!name) return false;
+                return txComments.includes(name);
             });
 
             if (matchedBoy) {
@@ -103,28 +105,28 @@ export const syncNedarimTransactions = onSchedule("every 5 minutes", async (_eve
                 // Persist transaction (idempotent — TransactionId as doc ID)
                 batch.set(db.collection("transactions").doc(String(currentTxId)), {
                     nedarimTransactionId: currentTxId,
-                    boyId:    matchedBoy.ref.id,
-                    boyName:  matchedBoy.name ?? txParam1,
+                    boyId:     matchedBoy.ref.id,
+                    boyName:   matchedBoy.name ?? "",
                     amount,
-                    donorName:  String(tx.ClientName ?? ""),
-                    param1:     txParam1,
-                    param2:     txParam2,
-                    rawData:    tx,
-                    status:     "completed",
-                    source:     "nedarim",
-                    createdAt:  admin.firestore.FieldValue.serverTimestamp(),
+                    donorName,
+                    comments:  txComments,
+                    rawData:   tx,
+                    status:    "completed",
+                    source:    "nedarim",
+                    createdAt: admin.firestore.FieldValue.serverTimestamp(),
                 }, { merge: true });
             } else {
-                // No boy matched — park for manual resolution
+                // No boy matched — park for manual resolution.
+                // The `comments` field shows exactly what the operator wrote so
+                // admins know which nedarimName to configure on the boy's record.
                 batch.set(db.collection("unmatched_transactions").doc(String(currentTxId)), {
                     nedarimTransactionId: currentTxId,
-                    donorName:  String(tx.ClientName ?? ""),
-                    param1:     txParam1,
-                    param2:     txParam2,
+                    donorName,
+                    comments:  txComments,
                     amount,
-                    rawData:    tx,
-                    status:     "pending_match",
-                    source:     "nedarim",
+                    rawData:   tx,
+                    status:    "pending_match",
+                    source:    "nedarim",
                     createdAt:  admin.firestore.FieldValue.serverTimestamp(),
                 }, { merge: true });
             }
@@ -167,12 +169,16 @@ export const pushOfflineDonationToNedarim = onCall(async (request) => {
         throw new HttpsError("internal", "Nedarim API credentials are not configured on the server");
     }
 
+    // Comments is set to the nedarimName so the cron's Comments.includes() match
+    // can find this transaction when GetHistoryJson returns it.
+    // MatrimId is also set as a belt-and-suspenders identifier on Nedarim's side.
     const params = new URLSearchParams({
         Action:      "MatchingOffline",
         MosadNumber: mosadId,
         ApiPassword: apiPassword,
-        MatrimId:    nedarimName,                        // fundraiser name, not numeric ID
+        MatrimId:    nedarimName,
         ClientName:  donorName?.trim() || "Offline Donation",
+        Comments:    nedarimName,         // ← ensures Comments.includes(nedarimName) == true
         Amount:      String(amount),
     });
 
