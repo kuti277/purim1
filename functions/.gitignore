@@ -1,0 +1,10 @@
+# Local environment — never commit credentials
+.env
+.env.local
+.env.*.local
+
+# Compiled output
+lib/
+
+# Dependencies
+node_modules/
