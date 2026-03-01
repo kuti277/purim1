@@ -1,4 +1,4 @@
-import { clientAuth, clientDb, clientStorage } from "@purim/firebase-config";
+import { clientApp, clientAuth, clientDb, clientStorage } from "@purim/firebase-config";
 import { connectAuthEmulator } from "firebase/auth";
 import { connectFirestoreEmulator } from "firebase/firestore";
 import { connectStorageEmulator } from "firebase/storage";
@@ -31,4 +31,4 @@ if (
   window.__PURIM_EMULATORS_CONNECTED__ = true;
 }
 
-export { clientAuth, clientDb, clientStorage };
+export { clientApp, clientAuth, clientDb, clientStorage };

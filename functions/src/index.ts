@@ -1,4 +1,4 @@
-import { onRequest } from "firebase-functions/v2/https";
+import { onRequest, onCall, HttpsError } from "firebase-functions/v2/https";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import * as logger from "firebase-functions/logger";
 import * as admin from "firebase-admin";
@@ -114,4 +114,55 @@ export const syncNedarimTransactions = onSchedule("every 5 minutes", async (_eve
     } catch (error) {
         console.error("Error syncing with Nedarim:", error);
     }
+});
+
+// ─── Nedarim Plus: Push Offline Donation ─────────────────────────────────────
+// Callable from the Dashboard frontend — proxies to the Nedarim MatchingOffline
+// endpoint so that credentials never leave the server and CORS is avoided.
+
+export const pushOfflineDonationToNedarim = onCall(async (request) => {
+    const { matrimId, clientName, amount } = request.data as {
+        matrimId: string | number;
+        clientName: string;
+        amount: number;
+    };
+
+    if (!matrimId || !clientName || amount === undefined || amount === null) {
+        throw new HttpsError(
+            "invalid-argument",
+            "Missing required parameters: matrimId, clientName, amount"
+        );
+    }
+
+    const mosadId     = process.env.NEDARIM_MOSAD_ID;
+    const apiPassword = process.env.NEDARIM_API_PASSWORD;
+
+    if (!mosadId || !apiPassword) {
+        throw new HttpsError("internal", "Nedarim API credentials are not configured on the server");
+    }
+
+    const params = new URLSearchParams({
+        Action:      "MatchingOffline",
+        MosadNumber: mosadId,
+        ApiPassword: apiPassword,
+        MatrimId:    String(matrimId),
+        ClientName:  clientName,
+        Amount:      String(amount),
+    });
+
+    const url = `https://matara.pro/nedarimplus/Reports/Manage3.aspx?${params.toString()}`;
+
+    const response = await fetch(url);
+    const text = await response.text();
+
+    let data: unknown;
+    try {
+        data = JSON.parse(text);
+    } catch {
+        // Nedarim sometimes returns plain-text on error — wrap it so the
+        // client always receives a consistent object.
+        data = { rawResponse: text };
+    }
+
+    return data;
 });

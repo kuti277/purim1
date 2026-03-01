@@ -10,7 +10,8 @@ import {
   Timestamp,
   updateDoc,
 } from "firebase/firestore";
-import { clientDb } from "../lib/firebase";
+import { getFunctions, httpsCallable } from "firebase/functions";
+import { clientApp, clientDb } from "../lib/firebase";
 import { NedarimPaymentModal } from "../components/NedarimPaymentModal";
 
 // ─── Local types ──────────────────────────────────────────────────────────────
@@ -36,6 +37,7 @@ interface BoyDoc {
   totalRaised: number;
   nedarimName?: string;
   donorNumber?: string;
+  matrimId?: string;
 }
 
 interface FolderDoc {
@@ -427,6 +429,149 @@ function TransactionHistoryTable({
   );
 }
 
+// ─── Manual Nedarim Update ────────────────────────────────────────────────────
+
+interface ManualNedarimUpdateProps {
+  boys: BoyDoc[];
+  onSuccess: (msg: string) => void;
+}
+
+function ManualNedarimUpdate({ boys, onSuccess }: ManualNedarimUpdateProps) {
+  const [selectedBoyId, setSelectedBoyId] = useState("");
+  const [amount, setAmount]               = useState("");
+  const [submitting, setSubmitting]       = useState(false);
+  const [error, setError]                 = useState<string | null>(null);
+
+  const pushFn = httpsCallable(getFunctions(clientApp), "pushOfflineDonationToNedarim");
+
+  async function submit(direction: 1 | -1) {
+    setError(null);
+    const parsedAmount = parseFloat(amount);
+    if (isNaN(parsedAmount) || parsedAmount <= 0) {
+      setError("יש להזין סכום חיובי תקין");
+      return;
+    }
+    const boy = boys.find((b) => b.id === selectedBoyId);
+    if (!boy) {
+      setError("יש לבחור ילד מהרשימה");
+      return;
+    }
+    if (!boy.matrimId) {
+      setError(`לילד "${boy.name}" לא הוגדר MatrimId — עדכן אותו תחילה בניהול ילדים`);
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      const result = await pushFn({
+        matrimId:   boy.matrimId,
+        clientName: boy.nedarimName ?? boy.name,
+        amount:     parsedAmount * direction,
+      });
+      const data = result.data as Record<string, unknown>;
+      // Nedarim returns Status:"Success" on success
+      if (data?.Status === "Error" || data?.Status === "error") {
+        throw new Error(String(data?.Description ?? data?.Message ?? "שגיאה מנדרים"));
+      }
+      const label = direction === 1 ? "זיכוי" : "חיוב";
+      onSuccess(`${label} של ₪${parsedAmount.toLocaleString("he-IL")} עבור ${boy.name} בוצע בהצלחה`);
+      setAmount("");
+      setSelectedBoyId("");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "שגיאה לא צפויה";
+      setError(msg);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white shadow-sm p-6">
+      <h2 className="text-base font-semibold text-gray-800 mb-5">עדכון נדרים ידני</h2>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        {/* Boy selector */}
+        <div className="flex flex-col gap-1">
+          <label htmlFor="mn-boy" className={labelCls}>בחר ילד</label>
+          <select
+            id="mn-boy"
+            value={selectedBoyId}
+            onChange={(e) => setSelectedBoyId(e.target.value)}
+            className={fieldCls}
+            disabled={submitting}
+          >
+            <option value="">בחר ילד...</option>
+            {boys.map((b) => (
+              <option key={b.id} value={b.id}>
+                {b.name}
+                {b.nedarimName && b.nedarimName !== b.name ? ` (${b.nedarimName})` : ""}
+                {!b.matrimId ? " ⚠️" : ""}
+              </option>
+            ))}
+          </select>
+          {selectedBoyId && !boys.find((b) => b.id === selectedBoyId)?.matrimId && (
+            <p className="text-[11px] text-amber-600">חסר MatrimId — נדרים לא יוכל לשייך את הסכום</p>
+          )}
+        </div>
+
+        {/* Amount */}
+        <div className="flex flex-col gap-1">
+          <label htmlFor="mn-amount" className={labelCls}>סכום (₪)</label>
+          <input
+            id="mn-amount"
+            type="number"
+            min="1"
+            step="1"
+            dir="ltr"
+            placeholder="0"
+            value={amount}
+            onChange={(e) => setAmount(e.target.value)}
+            className={fieldCls}
+            disabled={submitting}
+          />
+        </div>
+
+        {/* Action buttons */}
+        <div className="flex flex-col gap-1">
+          <span className={labelCls}>פעולה</span>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => submit(1)}
+              disabled={submitting}
+              className="
+                flex-1 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white
+                hover:bg-emerald-500 transition-colors
+                disabled:cursor-not-allowed disabled:opacity-50
+                focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-1
+              "
+            >
+              {submitting ? "..." : "הוסף (+)"}
+            </button>
+            <button
+              type="button"
+              onClick={() => submit(-1)}
+              disabled={submitting}
+              className="
+                flex-1 rounded-lg bg-red-600 px-4 py-2 text-sm font-semibold text-white
+                hover:bg-red-500 transition-colors
+                disabled:cursor-not-allowed disabled:opacity-50
+                focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-1
+              "
+            >
+              {submitting ? "..." : "הפחת (-)"}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {error && (
+        <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>
+      )}
+    </div>
+  );
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export function TransactionsPage() {
@@ -578,6 +723,12 @@ export function TransactionsPage() {
         boys={boys}
         folders={folders}
         onSaved={() => showSuccess("התרומה התקבלה לעיבוד — תופיע בטבלה לאחר אישור השרת")}
+      />
+
+      {/* Manual Nedarim Update */}
+      <ManualNedarimUpdate
+        boys={boys}
+        onSuccess={showSuccess}
       />
 
       {/* Transaction history */}

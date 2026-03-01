@@ -33,7 +33,7 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.syncNedarimTransactions = exports.healthCheck = exports.yemotPersonal = exports.yemotGeneral = exports.processTransactionCancellation = exports.processPendingTransaction = void 0;
+exports.pushOfflineDonationToNedarim = exports.syncNedarimTransactions = exports.healthCheck = exports.yemotPersonal = exports.yemotGeneral = exports.processTransactionCancellation = exports.processPendingTransaction = void 0;
 const https_1 = require("firebase-functions/v2/https");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const logger = __importStar(require("firebase-functions/logger"));
@@ -133,5 +133,40 @@ exports.syncNedarimTransactions = (0, scheduler_1.onSchedule)("every 5 minutes",
     catch (error) {
         console.error("Error syncing with Nedarim:", error);
     }
+});
+// ─── Nedarim Plus: Push Offline Donation ─────────────────────────────────────
+// Callable from the Dashboard frontend — proxies to the Nedarim MatchingOffline
+// endpoint so that credentials never leave the server and CORS is avoided.
+exports.pushOfflineDonationToNedarim = (0, https_1.onCall)(async (request) => {
+    const { matrimId, clientName, amount } = request.data;
+    if (!matrimId || !clientName || amount === undefined || amount === null) {
+        throw new https_1.HttpsError("invalid-argument", "Missing required parameters: matrimId, clientName, amount");
+    }
+    const mosadId = process.env.NEDARIM_MOSAD_ID;
+    const apiPassword = process.env.NEDARIM_API_PASSWORD;
+    if (!mosadId || !apiPassword) {
+        throw new https_1.HttpsError("internal", "Nedarim API credentials are not configured on the server");
+    }
+    const params = new URLSearchParams({
+        Action: "MatchingOffline",
+        MosadNumber: mosadId,
+        ApiPassword: apiPassword,
+        MatrimId: String(matrimId),
+        ClientName: clientName,
+        Amount: String(amount),
+    });
+    const url = `https://matara.pro/nedarimplus/Reports/Manage3.aspx?${params.toString()}`;
+    const response = await fetch(url);
+    const text = await response.text();
+    let data;
+    try {
+        data = JSON.parse(text);
+    }
+    catch {
+        // Nedarim sometimes returns plain-text on error — wrap it so the
+        // client always receives a consistent object.
+        data = { rawResponse: text };
+    }
+    return data;
 });
 //# sourceMappingURL=index.js.map
