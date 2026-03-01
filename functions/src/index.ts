@@ -30,7 +30,7 @@ export const healthCheck = onRequest((req, res) => {
 
 // ─── Nedarim Plus Sync ────────────────────────────────────────────────────────
 
-export const syncNedarimTransactions = onSchedule("every 5 minutes", async (event) => {
+export const syncNedarimTransactions = onSchedule("every 5 minutes", async (_event) => {
     try {
         const db = admin.firestore();
         const syncDocRef = db.collection("system").doc("nedarim_sync");
@@ -47,9 +47,10 @@ export const syncNedarimTransactions = onSchedule("every 5 minutes", async (even
         const url = `https://matara.pro/nedarimplus/Reports/Manage3.aspx?Action=GetHistoryJson&MosadId=${mosadId}&ApiPassword=${apiPassword}&LastId=${lastId}`;
 
         const response = await fetch(url);
-        const data = await response.json();
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const data = await response.json() as any;
 
-        if (!data || data.Status === "Error" || data.length === 0) {
+        if (!data || data.Status === "Error" || !Array.isArray(data) || data.length === 0) {
             console.log("No new transactions or error from Nedarim");
             return;
         }
@@ -57,7 +58,8 @@ export const syncNedarimTransactions = onSchedule("every 5 minutes", async (even
         const batch = db.batch();
         let maxId = lastId;
 
-        for (const tx of data) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        for (const tx of data as any[]) {
             const currentTxId = parseInt(tx.TransactionId || "0");
             if (currentTxId > maxId) {
                 maxId = currentTxId;
