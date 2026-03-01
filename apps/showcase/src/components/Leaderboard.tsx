@@ -153,7 +153,7 @@ function useRecentTransactions(): { txs: Transaction[]; loading: boolean } {
         setTxs(
           snap.docs
             .map((d) => ({ id: d.id, ...d.data() } as Transaction))
-            .filter((t) => t.status !== "cancelled"),
+            .filter((t) => t.status !== "cancelled" && t.status !== "request_cancel"),
         );
         setLoading(false);
       },
@@ -180,7 +180,7 @@ function useDailyTransactions(): Transaction[] {
         setTxs(
           snap.docs
             .map((d) => ({ id: d.id, ...d.data() } as Transaction))
-            .filter((t) => t.status !== "cancelled"),
+            .filter((t) => t.status !== "cancelled" && t.status !== "request_cancel"),
         );
       },
     );
@@ -317,13 +317,29 @@ function Panel({
 
 function CampaignNameCard({ name: _name }: { name: string }) {
   return (
-    <div className="flex h-full items-center gap-5 rounded-2xl bg-gradient-to-br from-indigo-950 to-gray-900 px-6 ring-1 ring-indigo-500/20">
-      <img src="/assets/logo.png" alt="Logo" className="h-36 w-auto shrink-0 drop-shadow-xl" />
+    <div className="flex h-full flex-row items-center gap-6 rounded-2xl bg-gradient-to-br from-indigo-950 to-gray-900 px-6 ring-1 ring-indigo-500/20">
+      <img
+        src="/assets/logo.png"
+        alt="Logo"
+        className="h-24 w-auto shrink-0 object-contain drop-shadow-2xl"
+        onError={(e) => { e.currentTarget.style.display = "none"; }}
+      />
       <div className="flex min-w-0 flex-col">
-        <h1 className="text-2xl font-bold leading-snug text-white">
-          יוצאים להתקפה
+        <h1
+          className="text-4xl md:text-5xl font-extrabold text-transparent"
+          style={{
+            backgroundImage: "url('/assets/fuego.gif')",
+            backgroundSize: "cover",
+            backgroundPosition: "center",
+            WebkitBackgroundClip: "text",
+            backgroundClip: "text",
+            WebkitTextFillColor: "transparent",
+            color: "transparent",
+          }}
+        >
+          יוצאים להפגיז תחת אש
         </h1>
-        <div className="mt-2 flex items-center gap-1.5">
+        <div className="mt-1 flex items-center gap-1.5">
           <span className="h-2 w-2 animate-pulse rounded-full bg-green-400 shadow shadow-green-400/60" />
           <span className="text-[10px] font-medium tracking-widest text-green-400/70">
             שידור חי
@@ -409,6 +425,7 @@ function DailyStarCard({
           src="/assets/leizan.png"
           alt={`תמונת ${star.name}`}
           className={`h-full w-full rounded-full object-cover ring-4 ${z.ring}`}
+          onError={(e) => { e.currentTarget.style.display = "none"; }}
         />
       </div>
 
@@ -447,6 +464,7 @@ function DailyStarCard({
             alt=""
             aria-hidden
             className="h-40 w-40 object-contain drop-shadow-2xl"
+            onError={(e) => { e.currentTarget.style.display = "none"; }}
           />
         </div>
       )}
@@ -458,6 +476,7 @@ function DailyStarCard({
           alt=""
           aria-hidden
           className="h-full w-full object-cover opacity-50"
+          onError={(e) => { e.currentTarget.style.display = "none"; }}
         />
       </div>
     </div>
@@ -583,6 +602,7 @@ function ShiurPanel({ boys, coinsShiurNames, globalGoal, boyTotals }: { boys: Bo
                   alt=""
                   aria-hidden
                   className="pointer-events-none absolute inset-0 z-0 h-full w-full object-cover opacity-50"
+                  onError={(e) => { e.currentTarget.style.display = "none"; }}
                 />
               )}
               {/* Confetti overlay — leader (top-ranked shiur) only */}
@@ -592,6 +612,7 @@ function ShiurPanel({ boys, coinsShiurNames, globalGoal, boyTotals }: { boys: Bo
                   alt=""
                   aria-hidden
                   className="pointer-events-none absolute inset-0 z-0 h-full w-full object-cover opacity-40"
+                  onError={(e) => { e.currentTarget.style.display = "none"; }}
                 />
               )}
               <div className="relative z-10 flex items-center gap-3">
@@ -605,6 +626,7 @@ function ShiurPanel({ boys, coinsShiurNames, globalGoal, boyTotals }: { boys: Bo
                     alt=""
                     aria-hidden
                     className={`h-8 w-8 shrink-0 rounded-full object-cover ring-2 ${z.ring}`}
+                    onError={(e) => { e.currentTarget.style.display = "none"; }}
                   />
                 )}
                 <div className="min-w-0 flex-1">
