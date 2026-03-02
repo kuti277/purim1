@@ -373,12 +373,22 @@ function DailyStarCard({
   globalGoal: number;
   boyTotals: Map<string, number>;
 }) {
+  // A boy with totalRaised <= 0 MUST NEVER appear as the star/leader.
+  const firstPositiveBoy = useMemo(
+    () => boys.find((b) => (boyTotals.get(b.id) ?? 0) > 0) ?? null,
+    [boys, boyTotals],
+  );
+
   const { star, dailyAmt, isDefault } = useMemo(() => {
     if (dailyTxs.length === 0) {
-      return { star: boys[0] ?? null, dailyAmt: 0, isDefault: true };
+      // Default view: pick the all-time leader — but only if they have raised > 0.
+      return { star: firstPositiveBoy, dailyAmt: 0, isDefault: true };
     }
     const totals = new Map<string, number>();
     for (const tx of dailyTxs) {
+      // dailyTxs is already filtered amount > 0 by useDailyTransactions, but
+      // guard again here so a rogue negative never inflates topAmt.
+      if (tx.amount <= 0) continue;
       totals.set(tx.targetId, (totals.get(tx.targetId) ?? 0) + tx.amount);
     }
     let topId = "", topAmt = 0;
@@ -386,11 +396,12 @@ function DailyStarCard({
       if (amt > topAmt) { topAmt = amt; topId = id; }
     }
     return {
-      star: boys.find((b) => b.id === topId) ?? boys[0] ?? null,
+      // Fall back to the all-time positive leader, never to a zero-total boy.
+      star: boys.find((b) => b.id === topId) ?? firstPositiveBoy,
       dailyAmt: topAmt,
       isDefault: false,
     };
-  }, [boys, dailyTxs]);
+  }, [boys, dailyTxs, firstPositiveBoy]);
 
   if (!star) {
     return (
@@ -712,7 +723,7 @@ function TransactionsPanel({ txs, boys, boyTotals }: { txs: Transaction[]; boys:
         <div className="relative z-10 min-w-0 flex-1">
           {/* Fundraiser name (boy being collected for) */}
           <p className="truncate text-sm font-bold text-white">
-            {tx.targetName || "תלמיד לא ידוע"}
+            {(tx.targetName && tx.targetName !== "כללי") ? tx.targetName : "תרומה כללית"}
           </p>
           {/* Donor name — who made the donation */}
           {tx.donorName ? (
@@ -947,14 +958,15 @@ function Ticker({
 
         {/* ── Strict JSX conditional: transactions rendered ONLY when flag is ON ── */}
         {showTransactions && txs.slice(0, 5).map((tx, i) => {
-          const base        = `💳 ${tx.targetName || "תלמיד"} התרים ${nis(tx.amount)}`;
+          const collectorName = (tx.targetName && tx.targetName !== "כללי") ? tx.targetName : "תרומה כללית";
+          const base        = `💳 ${collectorName} התרים ${nis(tx.amount)}`;
           const donor       = tx.donorName ? ` · תורם: ${tx.donorName}` : "";
           const cleanDedic  = stripTag(tx.dedication);
           const text        = cleanDedic ? `${base}${donor} — הקדשה: ${cleanDedic}` : `${base}${donor}`;
           return <span key={`${prefix}-tx-${i}`}>{text}{SEP}</span>;
         })}
 
-        {showTransactions && boys.slice(0, 3).map((b, i) => (
+        {showTransactions && boys.filter((b) => (boyTotals.get(b.id) ?? 0) > 0).slice(0, 3).map((b, i) => (
           <span key={`${prefix}-boy-${b.id}`}>
             {MEDALS[i]} מקום {i + 1}: {b.name} — {nis(boyTotals.get(b.id) ?? 0)}{SEP}
           </span>
@@ -1113,7 +1125,9 @@ export function Leaderboard() {
     }
 
     const prevIds = prevTxIdsRef.current;
-    const newTxs  = txs.filter((t) => !prevIds.has(t.id));
+    // Double-guard: txs is already amount>0 from useRecentTransactions,
+    // but enforce again here so negatives NEVER trigger applause or GIFs.
+    const newTxs  = txs.filter((t) => !prevIds.has(t.id) && t.amount > 0);
     prevTxIdsRef.current = new Set(txs.map((t) => t.id));
 
     if (newTxs.length === 0) return;

@@ -752,7 +752,8 @@ export function DashboardHomePage() {
     const today = new Date().toDateString();
     return txs.filter((tx) => tx.date.toDate().toDateString() === today && tx.status !== "cancelled").length;
   }, [txs]);
-  const topBoy = boys[0] ?? null;
+  // A boy with totalRaised <= 0 must NEVER appear as the leader.
+  const topBoy = useMemo(() => boys.find((b) => b.totalRaised > 0) ?? null, [boys]);
 
   const bindersCollectingToday = useMemo(
     () => binders.filter((b) => b.status === "collecting" && isToday(b.statusUpdatedAt)).length,
