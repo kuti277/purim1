@@ -489,12 +489,11 @@ function CampaignTotalCard({ boys, globalGoal, raised }: { boys: Boy[]; globalGo
   // `raised` comes from the parent Leaderboard component (derived from the
   // centralised transactions snapshot) — never touches boys.totalRaised.
 
-  // Use the admin-configured global goal only when it's set AND is at least as
-  // large as the sum of all individual boys' goals.  This guards against
-  // accidental tiny values (e.g. someone typed "5" meaning 5,000).
+  // The admin-configured global goal takes priority whenever it is set (> 0).
+  // Only fall back to summing boys' individual goals if no global goal is set.
   const goal = useMemo(() => {
-    const sum = boys.reduce((s, b) => s + b.goal, 0);
-    return (globalGoal > 0 && globalGoal >= sum) ? globalGoal : sum;
+    if (globalGoal > 0) return globalGoal;
+    return boys.reduce((s, b) => s + b.goal, 0);
   }, [globalGoal, boys]);
 
   const p = pct(raised, goal);

@@ -480,16 +480,14 @@ function ManualNedarimUpdate({ boys, onSuccess }: ManualNedarimUpdateProps) {
         amount:      signedAmount,
       });
       const data = result.data as Record<string, unknown>;
-      if (data?.Status === "Error" || data?.Status === "error") {
-        throw new Error(String(data?.Description ?? data?.Message ?? "שגיאה מנדרים"));
-      }
 
       // ── 2. Write transaction to Firestore immediately ────────────────────
-      // Use Nedarim's returned TransactionId as doc ID when available so the
-      // cron's later merge lands on the same document (no duplicates).
-      // The cron's pre-fetch will find this doc and skip the totalRaised increment.
-      const txDocId = data?.TransactionId
-        ? String(data.TransactionId)
+      // The backend returns { success, transactionId, raw } where transactionId
+      // is the real Nedarim ID from SaveAchnasot's "ID" field.
+      // Using it as the Firestore doc ID means the cron's later merge lands on
+      // the same document and skips the totalRaised increment (no duplicates).
+      const txDocId = data?.transactionId
+        ? String(data.transactionId)
         : `manual_${Date.now()}`;
 
       await setDoc(doc(clientDb, "transactions", txDocId), {

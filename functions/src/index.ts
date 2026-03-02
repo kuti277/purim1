@@ -242,14 +242,28 @@ export const pushOfflineDonationToNedarim = onCall(async (request) => {
     const response = await fetch(url);
     const text = await response.text();
 
-    let data: unknown;
+    let parsed: Record<string, unknown>;
     try {
-        data = JSON.parse(text);
+        parsed = JSON.parse(text) as Record<string, unknown>;
     } catch {
         // Nedarim sometimes returns plain-text on error — wrap it so the
         // client always receives a consistent object.
-        data = { rawResponse: text };
+        throw new HttpsError("internal", `Nedarim returned non-JSON: ${text.slice(0, 200)}`);
     }
 
-    return data;
+    if (parsed["Status"] === "Error" || parsed["Status"] === "error") {
+        throw new HttpsError(
+            "internal",
+            String(parsed["Description"] ?? parsed["Message"] ?? "Nedarim API error")
+        );
+    }
+
+    // SaveAchnasot returns the new transaction ID in a field named "ID".
+    // Expose it as `transactionId` so the frontend can use it as the Firestore
+    // doc ID — preventing the cron from creating a duplicate 5 min later.
+    return {
+        success:       true,
+        transactionId: parsed["ID"] ?? null,
+        raw:           parsed,
+    };
 });
