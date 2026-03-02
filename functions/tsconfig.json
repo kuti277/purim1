@@ -16,5 +16,5 @@
   },
   "compileOnSave": true,
   "include": ["src"],
-  "exclude": ["src/test-nedarim.ts"]
+  "exclude": ["src/test-nedarim.ts", "src/reset-sync.ts"]
 }
