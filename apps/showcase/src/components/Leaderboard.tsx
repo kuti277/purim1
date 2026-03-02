@@ -153,7 +153,7 @@ function useRecentTransactions(): { txs: Transaction[]; loading: boolean } {
         setTxs(
           snap.docs
             .map((d) => ({ id: d.id, ...d.data() } as Transaction))
-            .filter((t) => t.status !== "cancelled" && t.status !== "request_cancel"),
+            .filter((t) => t.status !== "cancelled" && t.status !== "request_cancel" && t.amount > 0),
         );
         setLoading(false);
       },
@@ -165,6 +165,8 @@ function useRecentTransactions(): { txs: Transaction[]; loading: boolean } {
 /**
  * Listens to all non-cancelled transactions since the last 14:00 cutoff.
  * Client-side status filter avoids a composite Firestore index.
+ * Negative-amount entries (manual offsets) are excluded so they don't
+ * distort the daily star ranking or trigger live-feed effects.
  */
 function useDailyTransactions(): Transaction[] {
   const [txs, setTxs] = useState<Transaction[]>([]);
@@ -180,7 +182,7 @@ function useDailyTransactions(): Transaction[] {
         setTxs(
           snap.docs
             .map((d) => ({ id: d.id, ...d.data() } as Transaction))
-            .filter((t) => t.status !== "cancelled" && t.status !== "request_cancel"),
+            .filter((t) => t.status !== "cancelled" && t.status !== "request_cancel" && t.amount > 0),
         );
       },
     );
