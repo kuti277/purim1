@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
   doc,
-  getDoc,
   serverTimestamp,
   setDoc,
 } from "firebase/firestore";
@@ -89,10 +88,6 @@ export function NedarimPaymentModal({
   const [comboOpen, setComboOpen]   = useState(false);
   const comboRef = useRef<HTMLDivElement>(null);
 
-  // ── API credentials (loaded once per open) ────────────────────────────────
-  const [mosad, setMosad]       = useState("");
-  const [apiValid, setApiValid] = useState("");
-
   // ── UI state ──────────────────────────────────────────────────────────────
   const [paying, setPaying]             = useState(false);
   const [error, setError]               = useState<string | null>(null);
@@ -113,21 +108,6 @@ export function NedarimPaymentModal({
         (b.nedarimName ?? "").toLowerCase().includes(boySearch.trim().toLowerCase())
       )
     : boys;
-
-  // ── Load API credentials on open ─────────────────────────────────────────
-  useEffect(() => {
-    if (!open) return;
-    let cancelled = false;
-    getDoc(doc(clientDb, "settings", "apiKeys"))
-      .then((snap) => {
-        if (cancelled || !snap.exists()) return;
-        const d = snap.data() as { mosadId?: string; apiKey?: string };
-        if (d.mosadId) setMosad(d.mosadId);
-        if (d.apiKey)  setApiValid(d.apiKey);
-      })
-      .catch((err) => console.error("[NedarimModal] load creds:", err));
-    return () => { cancelled = true; };
-  }, [open]);
 
   // ── Close combobox on outside click ──────────────────────────────────────
   useEffect(() => {
@@ -226,10 +206,6 @@ export function NedarimPaymentModal({
       setError("יש להזין שם תורם");
       return;
     }
-    if (!mosad || !apiValid) {
-      setError("פרטי ה-API חסרים — הגדר אותם תחת מרכז סנכרון");
-      return;
-    }
 
     setPaying(true);
 
@@ -243,8 +219,6 @@ export function NedarimPaymentModal({
     const fundraiserLabel = resolvedParam1 || selectedBoy?.name || "";
     const payload: Record<string, string> = {
       Action:      "לשלם",
-      Mosad:       mosad,
-      ApiValid:    apiValid,
       Amount:      String(parsedAmount),
       ClientName:  clientName.trim(),
       PaymentType: "Ragil",

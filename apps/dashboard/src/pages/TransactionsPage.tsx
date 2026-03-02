@@ -19,6 +19,8 @@ import { NedarimPaymentModal } from "../components/NedarimPaymentModal";
 interface TxDoc {
   id: string;
   type: "credit" | "cash";
+  paymentMethod?: string;
+  source?: string;
   amount: number;
   targetId: string;
   targetType: "folder" | "boy";
@@ -387,7 +389,9 @@ function TransactionHistoryTable({
 
                 {/* Type */}
                 <td className="px-4 py-3 text-sm text-gray-600">
-                  {tx.type === "credit" ? "אשראי" : "מזומן"}
+                  {tx.source === "nedarim" || tx.type === "credit" || tx.paymentMethod === "credit"
+                    ? "אשראי"
+                    : "מזומן"}
                 </td>
 
                 {/* Dedication */}
@@ -400,9 +404,9 @@ function TransactionHistoryTable({
                   <StatusBadge status={tx.status} />
                 </td>
 
-                {/* Cancel action — only available on completed transactions */}
+                {/* Cancel action — only available on manual completed transactions (not Nedarim) */}
                 <td className="px-4 py-3">
-                  {tx.status === "completed" && (
+                  {tx.status === "completed" && tx.source !== "nedarim" && (
                     <button
                       type="button"
                       onClick={() => onCancel(tx)}
@@ -503,13 +507,9 @@ function ManualNedarimUpdate({ boys, onSuccess }: ManualNedarimUpdateProps) {
               <option key={b.id} value={b.id}>
                 {b.name}
                 {b.nedarimName && b.nedarimName !== b.name ? ` (${b.nedarimName})` : ""}
-                {!b.nedarimName ? " ⚠️" : ""}
               </option>
             ))}
           </select>
-          {selectedBoyId && !boys.find((b) => b.id === selectedBoyId)?.nedarimName && (
-            <p className="text-[11px] text-amber-600">חסר שם נדרים — עדכן אותו בניהול ילדים</p>
-          )}
         </div>
 
         {/* Amount */}
