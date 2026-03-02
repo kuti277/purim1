@@ -253,4 +253,6 @@ exports.pushOfflineDonationToNedarim = (0, https_1.onCall)(async (request) => {
         raw: parsed,
     };
 });
+// adminBackfill2 used on 2026-03-02 — confirmed 104 transactions already in Firestore,
+// 0 new matches, lastId healthy at 67,292,935. Removed.
 //# sourceMappingURL=index.js.map
