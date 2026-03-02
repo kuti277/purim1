@@ -131,25 +131,15 @@ exports.syncNedarimTransactions = (0, scheduler_1.onSchedule)("every 5 minutes",
                     donorName,
                     comments: txComments,
                     rawData: tx,
+                    paymentMethod: "credit",
                     status: "completed",
                     source: "nedarim",
                     createdAt: admin.firestore.FieldValue.serverTimestamp(),
                 }, { merge: true });
             }
             else {
-                // No boy matched — park for manual resolution.
-                // The `comments` field shows exactly what the operator wrote so
-                // admins know which nedarimName to configure on the boy's record.
-                batch.set(db.collection("unmatched_transactions").doc(String(currentTxId)), {
-                    nedarimTransactionId: currentTxId,
-                    donorName,
-                    comments: txComments,
-                    amount,
-                    rawData: tx,
-                    status: "pending_match",
-                    source: "nedarim",
-                    createdAt: admin.firestore.FieldValue.serverTimestamp(),
-                }, { merge: true });
+                // No boy matched — skip silently.
+                continue;
             }
         }
         if (maxId > lastId) {
