@@ -209,21 +209,20 @@ export function NedarimPaymentModal({
 
     setPaying(true);
 
-    // Param1  = resolved Nedarim attribution name for precise collector mapping.
-    // MatrimId = donorNumber (collector's Nedarim ID) — allows Nedarim to link
-    //            the payment to the correct collector record on their system.
-    // Comment  = dedication / free text (Nedarim's native Comment field).
-    // Comment/Comments is set to the boy's nedarimName so that when Nedarim
-    // stores this transaction, GetHistoryJson returns it with Comments containing
-    // the fundraiser name — which is what the cron's matching logic reads.
+    // Comment is the field Nedarim stores in the `Comments` column of GetHistoryJson.
+    // It must contain the fundraiser's nedarimName as a substring so the cron's
+    // Comments.includes(nedarimName) match works. Any dedication the operator typed
+    // is appended after the name — matching is a substring check so it still works.
+    // This mirrors the campaign page format: "ע"י ליכט להצלחת חיה נשא בת רויזא".
     const fundraiserLabel = resolvedParam1 || selectedBoy?.name || "";
+    const commentValue = [fundraiserLabel, comment.trim()].filter(Boolean).join(" ");
     const payload: Record<string, string> = {
       Action:      "לשלם",
       Amount:      String(parsedAmount),
       ClientName:  clientName.trim(),
       PaymentType: "Ragil",
       Param1:      fundraiserLabel,   // kept for forward-compat
-      Comment:     fundraiserLabel,   // Nedarim stores this in the Comments field
+      Comment:     commentValue,      // fundraiser name + dedication → stored as Comments
     };
     if (selectedBoy?.donorNumber) {
       payload["MatrimId"] = selectedBoy.donorNumber;
