@@ -99,15 +99,20 @@ exports.syncNedarimTransactions = (0, scheduler_1.onSchedule)("every 5 minutes",
                 continue;
             // ── Match fundraiser via Comments (the ONLY reliable field) ─────────
             //
-            // Confirmed from live API output (test-nedarim.ts):
-            //   • tx.Param1, tx.Param2, tx.MatrimId → ALWAYS EMPTY in GetHistoryJson
-            //   • tx.ClientName                     → DONOR name, never the fundraiser
-            //   • tx.Comments                       → free-text set by operator,
-            //                                         e.g. "לזכות המתרים אברהם ליכט"
+            // Confirmed from live API output (full raw JSON dump, 2000 transactions):
+            //   • Param1 / Param2 / MatrimId → absent from GetHistoryJson schema
+            //   • Groupe                     → always the CAMPAIGN name ("מגבית פורים תשפ"ה"),
+            //                                  never the individual fundraiser
+            //   • ClientName                 → DONOR name, never the fundraiser
+            //   • Comments (69% populated)   → free-text combining fundraiser attribution
+            //                                  + optional donor dedication, e.g.:
+            //                                  "לזכות המתרים אברהם ליכט"
+            //                                  "ע"י ליכט להצלחת חיה נשא בת רויזא"
             //
-            // Matching rule: boy.nedarimName must be a substring of tx.Comments.
-            // Set boy.nedarimName to the shortest distinctive part of their name
-            // that appears consistently (e.g. "ליכט" rather than "הבחור החשוב ליכט").
+            // Matching rule: boy.nedarimName must appear as a substring of tx.Comments.
+            // The entire Comments string is saved as `dedication` (it is the closest
+            // field to a donor note — it always contains the fundraiser reference and
+            // sometimes a personal dedication appended after the name).
             const txComments = String(tx.Comments ?? "").trim();
             const donorName = String(tx.ClientName ?? "").trim();
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -123,14 +128,16 @@ exports.syncNedarimTransactions = (0, scheduler_1.onSchedule)("every 5 minutes",
                     totalRaised: admin.firestore.FieldValue.increment(amount),
                 });
                 // Persist transaction (idempotent — TransactionId as doc ID)
+                // `dedication` = full Comments string: contains fundraiser attribution
+                // ("ע"י ליכט") + optional donor dedication ("להצלחת...") in one field,
+                // mirroring exactly what the Nedarim campaign page stores.
                 batch.set(db.collection("transactions").doc(String(currentTxId)), {
                     nedarimTransactionId: currentTxId,
                     boyId: matchedBoy.ref.id,
                     boyName: matchedBoy.name ?? "",
                     amount,
                     donorName,
-                    comments: txComments,
-                    rawData: tx,
+                    dedication: txComments, // Comments = fundraiser ref + dedication
                     paymentMethod: "credit",
                     status: "completed",
                     source: "nedarim",
@@ -156,7 +163,7 @@ exports.syncNedarimTransactions = (0, scheduler_1.onSchedule)("every 5 minutes",
 // Callable from the Dashboard frontend — proxies to the Nedarim MatchingOffline
 // endpoint so that credentials never leave the server and CORS is avoided.
 exports.pushOfflineDonationToNedarim = (0, https_1.onCall)(async (request) => {
-    const { nedarimName, donorName, amount } = request.data;
+    const { nedarimName, donorName, dedication, amount } = request.data;
     if (!nedarimName || amount === undefined || amount === null) {
         throw new https_1.HttpsError("invalid-argument", "Missing required parameters: nedarimName, amount");
     }
@@ -165,16 +172,18 @@ exports.pushOfflineDonationToNedarim = (0, https_1.onCall)(async (request) => {
     if (!mosadId || !apiPassword) {
         throw new https_1.HttpsError("internal", "Nedarim API credentials are not configured on the server");
     }
-    // Comments is set to the nedarimName so the cron's Comments.includes() match
-    // can find this transaction when GetHistoryJson returns it.
-    // MatrimId is also set as a belt-and-suspenders identifier on Nedarim's side.
+    // Comments = "<nedarimName> <dedication>" so that:
+    //   1. cron's Comments.includes(nedarimName) still matches
+    //   2. the dedication text is preserved in Nedarim's own records
+    // This mirrors the format the campaign page uses ("ע"י ליכט להצלחת חיה נשא בת רויזא").
+    const comments = [nedarimName, dedication?.trim()].filter(Boolean).join(" ");
     const params = new URLSearchParams({
         Action: "MatchingOffline",
         MosadNumber: mosadId,
         ApiPassword: apiPassword,
         MatrimId: nedarimName,
         ClientName: donorName?.trim() || "Offline Donation",
-        Comments: nedarimName, // ← ensures Comments.includes(nedarimName) == true
+        Comments: comments,
         Amount: String(amount),
     });
     const url = `https://matara.pro/nedarimplus/Reports/Manage3.aspx?${params.toString()}`;
