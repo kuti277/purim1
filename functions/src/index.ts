@@ -44,7 +44,7 @@ export const syncNedarimTransactions = onSchedule("every 5 minutes", async (_eve
             lastId = syncDoc.data()?.lastId;
         }
 
-        const mosadId = process.env.NEDARIM_MOSAD_ID;
+        const mosadId     = process.env.NEDARIM_MOSAD_ID;
         const apiPassword = process.env.NEDARIM_API_PASSWORD;
 
         const url = `https://matara.pro/nedarimplus/Reports/Manage3.aspx?Action=GetHistoryJson&MosadId=${mosadId}&ApiPassword=${apiPassword}&LastId=${lastId}`;
@@ -58,10 +58,27 @@ export const syncNedarimTransactions = onSchedule("every 5 minutes", async (_eve
             return;
         }
 
-        // ── Fetch ALL boys once — avoids N Firestore reads inside the loop ────────
+        // ── Fetch ALL boys once ────────────────────────────────────────────────
         const boysSnap = await db.collection("boys").get();
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const allBoys = boysSnap.docs.map((d) => ({ ref: d.ref, ...d.data() } as any));
+
+        // ── Pre-fetch which transaction docs already exist ─────────────────────
+        // The frontend (iframe postMessage handler, ManualNedarimUpdate) writes to
+        // `transactions` immediately AND increments `boys.totalRaised` for instant UI
+        // feedback.  When the cron later picks up the same transaction we must NOT
+        // increment totalRaised a second time — we only update the metadata.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const incomingTxIds = (data as any[])
+            .map((tx) => String(tx.TransactionId || "0"))
+            .filter((id) => id !== "0");
+
+        const existingTxSnaps = await Promise.all(
+            incomingTxIds.map((id) => db.collection("transactions").doc(id).get())
+        );
+        const alreadyExisting = new Set(
+            existingTxSnaps.filter((s) => s.exists).map((s) => s.id)
+        );
 
         const batch = db.batch();
         let maxId = lastId;
@@ -69,64 +86,89 @@ export const syncNedarimTransactions = onSchedule("every 5 minutes", async (_eve
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         for (const tx of data as any[]) {
             const currentTxId = parseInt(tx.TransactionId || "0");
-            if (currentTxId > maxId) {
-                maxId = currentTxId;
-            }
+            if (currentTxId > maxId) maxId = currentTxId;
 
             const amount = parseFloat(tx.Amount);
             if (isNaN(amount)) continue;
 
-            // ── Match fundraiser via Comments (the ONLY reliable field) ─────────
-            //
-            // Confirmed from live API output (full raw JSON dump, 2000 transactions):
-            //   • Param1 / Param2 / MatrimId → absent from GetHistoryJson schema
-            //   • Groupe                     → always the CAMPAIGN name ("מגבית פורים תשפ"ה"),
-            //                                  never the individual fundraiser
-            //   • ClientName                 → DONOR name, never the fundraiser
-            //   • Comments (69% populated)   → free-text combining fundraiser attribution
-            //                                  + optional donor dedication, e.g.:
-            //                                  "לזכות המתרים אברהם ליכט"
-            //                                  "ע"י ליכט להצלחת חיה נשא בת רויזא"
-            //
-            // Matching rule: boy.nedarimName must appear as a substring of tx.Comments.
-            // The entire Comments string is saved as `dedication` (it is the closest
-            // field to a donor note — it always contains the fundraiser reference and
-            // sometimes a personal dedication appended after the name).
             const txComments = String(tx.Comments ?? "").trim();
             const donorName  = String(tx.ClientName ?? "").trim();
 
+            // ── STEP A — Deterministic numeric tag ────────────────────────────
+            //
+            // Our iframe and offline-push embed a tag like [#87] in Comments.
+            // Extract the numeric ID and look up the boy by donorNumber / matrimId.
+            // This is 100% accurate: no string comparison, no word-order sensitivity.
+            //
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const matchedBoy = allBoys.find((b: any) => {
-                const name = String(b.nedarimName ?? "").trim();
-                if (!name) return false;
-                return txComments.includes(name);
-            });
+            let matchedBoy: any = undefined;
+            const tagMatch = txComments.match(/\[#(\d+)\]/);
+            if (tagMatch) {
+                const extractedId = tagMatch[1];
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                matchedBoy = allBoys.find((b: any) => {
+                    const dn = String(b.donorNumber ?? b.matrimId ?? "").trim();
+                    return dn !== "" && dn === extractedId;
+                });
+            }
 
-            if (matchedBoy) {
-                // Increment the boy's running total
+            // ── STEP B — Fuzzy word-count match (external campaign page) ──────
+            //
+            // The live Nedarim campaign page does not embed our [#ID] tag.
+            // It writes free text like "ע"י המתרים אברהם ליכט" to Comments.
+            // A strict substring match fails when name order differs
+            // (DB: "ליכט אברהם יהודה" vs Comments: "אברהם ליכט").
+            //
+            // Rule: split nedarimName into words.
+            //   • 1 word  → must appear anywhere in Comments (case-insensitive).
+            //   • 2+ words → at least 2 individual words must appear (order-free).
+            if (!matchedBoy && txComments) {
+                const lowerComments = txComments.toLowerCase();
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                matchedBoy = allBoys.find((b: any) => {
+                    const name = String(b.nedarimName ?? "").trim();
+                    if (!name) return false;
+                    const words = name.split(/\s+/).filter(Boolean);
+                    if (words.length === 0) return false;
+                    if (words.length === 1) {
+                        return lowerComments.includes(words[0].toLowerCase());
+                    }
+                    // 2+ words: require at least 2 to match (prevents false positives
+                    // from single common words appearing in unrelated Comments)
+                    const hits = words.filter(
+                        (w: string) => lowerComments.includes(w.toLowerCase())
+                    ).length;
+                    return hits >= 2;
+                });
+            }
+
+            if (!matchedBoy) continue;
+
+            const txDocId  = String(currentTxId);
+            const txRef    = db.collection("transactions").doc(txDocId);
+            const isNewTx  = !alreadyExisting.has(txDocId);
+
+            // Only increment totalRaised for genuinely new transactions.
+            // If the frontend already wrote this doc (and incremented totalRaised),
+            // we skip the increment to prevent double-counting.
+            if (isNewTx) {
                 batch.update(matchedBoy.ref, {
                     totalRaised: admin.firestore.FieldValue.increment(amount),
                 });
-                // Persist transaction (idempotent — TransactionId as doc ID)
-                // `dedication` = full Comments string: contains fundraiser attribution
-                // ("ע"י ליכט") + optional donor dedication ("להצלחת...") in one field,
-                // mirroring exactly what the Nedarim campaign page stores.
-                batch.set(db.collection("transactions").doc(String(currentTxId)), {
-                    nedarimTransactionId: currentTxId,
-                    boyId:         matchedBoy.ref.id,
-                    boyName:       matchedBoy.name ?? "",
-                    amount,
-                    donorName,
-                    dedication:    txComments,   // Comments = fundraiser ref + dedication
-                    paymentMethod: "credit",
-                    status:        "completed",
-                    source:        "nedarim",
-                    createdAt:     admin.firestore.FieldValue.serverTimestamp(),
-                }, { merge: true });
-            } else {
-                // No boy matched — skip silently.
-                continue;
             }
+
+            batch.set(txRef, {
+                nedarimTransactionId: currentTxId,
+                boyId:         matchedBoy.ref.id,
+                boyName:       matchedBoy.name ?? "",
+                amount,
+                donorName,
+                dedication:    txComments,
+                paymentMethod: "credit",
+                status:        "completed",
+                source:        "nedarim",
+                createdAt:     admin.firestore.FieldValue.serverTimestamp(),
+            }, { merge: true });
         }
 
         if (maxId > lastId) {
@@ -134,7 +176,7 @@ export const syncNedarimTransactions = onSchedule("every 5 minutes", async (_eve
         }
 
         await batch.commit();
-        console.log(`Nedarim sync successful. Max ID updated to: ${maxId}`);
+        console.log(`Nedarim sync done. maxId=${maxId}  alreadyExisting=${alreadyExisting.size}`);
 
     } catch (error) {
         console.error("Error syncing with Nedarim:", error);
@@ -146,11 +188,12 @@ export const syncNedarimTransactions = onSchedule("every 5 minutes", async (_eve
 // endpoint so that credentials never leave the server and CORS is avoided.
 
 export const pushOfflineDonationToNedarim = onCall(async (request) => {
-    const { nedarimName, donorName, dedication, amount } = request.data as {
-        nedarimName: string;   // boy's nedarimName — must appear in Nedarim Comments for cron match
-        donorName?: string;    // actual donor's name; defaults to "Offline Donation"
-        dedication?: string;   // optional donor dedication appended after the fundraiser name
-        amount: number;
+    const { nedarimName, donorName, dedication, donorNumber, amount } = request.data as {
+        nedarimName:  string;   // boy's nedarimName — used as MatrimId and in Comments
+        donorName?:   string;   // actual donor name; defaults to "Offline Donation"
+        dedication?:  string;   // optional dedication appended to Comments
+        donorNumber?: string;   // numeric MatrimId — embedded as [#ID] tag for deterministic match
+        amount:       number;
     };
 
     if (!nedarimName || amount === undefined || amount === null) {
@@ -167,11 +210,12 @@ export const pushOfflineDonationToNedarim = onCall(async (request) => {
         throw new HttpsError("internal", "Nedarim API credentials are not configured on the server");
     }
 
-    // Comments = "<nedarimName> <dedication>" so that:
-    //   1. cron's Comments.includes(nedarimName) still matches
-    //   2. the dedication text is preserved in Nedarim's own records
-    // This mirrors the format the campaign page uses ("ע"י ליכט להצלחת חיה נשא בת רויזא").
-    const comments = [nedarimName, dedication?.trim()].filter(Boolean).join(" ");
+    // Comments format: "[#<donorNumber>] <nedarimName> <dedication>"
+    //   • [#ID] tag → cron Step A: regex numeric match (100% accurate)
+    //   • nedarimName included → cron Step B: fuzzy word-count match as fallback
+    //   • dedication → stored in Nedarim's own records for audit trail
+    const tagPart  = donorNumber ? `[#${donorNumber}]` : "";
+    const comments = [tagPart, nedarimName, dedication?.trim()].filter(Boolean).join(" ");
 
     const params = new URLSearchParams({
         Action:      "MatchingOffline",

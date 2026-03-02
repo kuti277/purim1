@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import {
   doc,
+  increment,
   serverTimestamp,
   setDoc,
+  updateDoc,
 } from "firebase/firestore";
 import { clientDb } from "../lib/firebase";
 
@@ -13,18 +15,19 @@ export interface BoyOption {
   /** Display name shown in the dropdown */
   name: string;
   /**
-   * "שם נדרים" — the external identifier registered with Nedarim Plus for
-   * this collector. Sent as `Param1` in the postMessage payload so that the
-   * Nedarim callback can attribute the donation precisely.
-   * Falls back to `name` when absent.
+   * "שם נדרים" — the external identifier used for fuzzy word-count matching
+   * against Nedarim's Comments field. Falls back to `name` when absent.
    */
   nedarimName?: string;
   /**
-   * Donor/collector number — same as `MatrimId` in the Nedarim API.
-   * Sent as `MatrimId` in the postMessage so Nedarim can attribute the
-   * payment to the correct collector record on their side.
+   * Numeric MatrimId registered with Nedarim Plus for this collector.
+   * Embedded as `[#<donorNumber>]` in the Comments/Comment field so the cron
+   * can match deterministically via a regex rather than string fuzzy logic.
+   * Stored as a string but should be numeric (e.g. "87").
    */
   donorNumber?: string;
+  /** Alternative field name used by some boy documents — treated identically to donorNumber. */
+  matrimId?: string;
 }
 
 export interface NedarimPaymentModalProps {
@@ -138,44 +141,55 @@ export function NedarimPaymentModal({
       const paidAmount = parseFloat(String(msg.Amount ?? amount));
       const boyName    = selectedBoy?.name ?? "כללי";
 
-      // Use Nedarim's TransactionId as the Firestore document ID so that a
-      // background CRON fetching the same transaction later will merge onto
-      // the exact same document — never create a duplicate.
+      // Use Nedarim's TransactionId as the doc ID so the cron's later
+      // setDoc(..., { merge: true }) lands on the SAME document — no duplicates.
+      // The cron pre-checks alreadyExisting and skips the totalRaised increment
+      // for docs we write here, preventing double-counting.
       const txId = String(msg.TransactionId ?? `nd_${Date.now()}`);
+      const numericId = selectedBoy?.donorNumber ?? selectedBoy?.matrimId ?? "";
 
-      setDoc(
-        doc(clientDb, "transactions", txId),
-        {
-          type:                 "credit",
-          source:               "nedarim_plus",
-          nedarimTransactionId: txId,
-          amount:               paidAmount,
-          targetId:             boyId   || "general",
-          targetType:           boyId   ? "boy" : "general",
-          targetName:           boyName,
-          // Attribution fields stored for cross-referencing with Nedarim records
-          nedarimParam1:        resolvedParam1,
-          donorNumber:          selectedBoy?.donorNumber ?? "",
-          dedication:           comment.trim(),
-          donorName:            clientName.trim(),
-          date:                 serverTimestamp(),
-          status:               "completed",
-          splitDetails:         [],
-        },
-        { merge: true }
-      )
-        .then(() => {
+      void (async () => {
+        try {
+          await setDoc(
+            doc(clientDb, "transactions", txId),
+            {
+              type:                 "credit",
+              source:               "nedarim_plus",
+              nedarimTransactionId: txId,
+              amount:               paidAmount,
+              targetId:             boyId || "general",
+              targetType:           boyId ? "boy"   : "general",
+              targetName:           boyName,
+              nedarimParam1:        resolvedParam1,
+              donorNumber:          numericId,
+              dedication:           comment.trim(),
+              donorName:            clientName.trim(),
+              date:                 serverTimestamp(),
+              status:               "completed",
+              splitDetails:         [],
+            },
+            { merge: true }
+          );
+
+          // Immediately update the boy's running total so the showcase and
+          // leaderboard reflect the payment without waiting for the 5-min cron.
+          if (boyId) {
+            await updateDoc(doc(clientDb, "boys", boyId), {
+              totalRaised: increment(paidAmount),
+            });
+          }
+
           setSuccessAmount(paidAmount);
           setSuccessBoyName(boyName);
           setSuccess(true);
           setPaying(false);
           onSuccess?.(paidAmount, boyName);
-        })
-        .catch((err) => {
+        } catch (err) {
           console.error("[NedarimModal] Firestore write error:", err);
           setError("התשלום בוצע אך שמירת הנתונים נכשלה — פנה למנהל המערכת");
           setPaying(false);
-        });
+        }
+      })();
     }
 
     window.addEventListener("message", handleMessage);
@@ -209,23 +223,25 @@ export function NedarimPaymentModal({
 
     setPaying(true);
 
-    // Comment is the field Nedarim stores in the `Comments` column of GetHistoryJson.
-    // It must contain the fundraiser's nedarimName as a substring so the cron's
-    // Comments.includes(nedarimName) match works. Any dedication the operator typed
-    // is appended after the name — matching is a substring check so it still works.
-    // This mirrors the campaign page format: "ע"י ליכט להצלחת חיה נשא בת רויזא".
+    // Comment → stored by Nedarim as the `Comments` field in GetHistoryJson.
+    // Format: "[#<donorNumber>] <nedarimName> <dedication>"
+    //   • [#ID] tag  → cron Step A: 100% deterministic numeric match
+    //   • nedarimName → cron Step B: fuzzy word-count match as fallback
+    //   • dedication  → free text preserved in Nedarim's own audit trail
     const fundraiserLabel = resolvedParam1 || selectedBoy?.name || "";
-    const commentValue = [fundraiserLabel, comment.trim()].filter(Boolean).join(" ");
+    const numericId       = selectedBoy?.donorNumber ?? selectedBoy?.matrimId ?? "";
+    const matrimTag       = numericId ? `[#${numericId}]` : "";
+    const commentValue    = [matrimTag, fundraiserLabel, comment.trim()].filter(Boolean).join(" ");
     const payload: Record<string, string> = {
       Action:      "לשלם",
       Amount:      String(parsedAmount),
       ClientName:  clientName.trim(),
       PaymentType: "Ragil",
-      Param1:      fundraiserLabel,   // kept for forward-compat
-      Comment:     commentValue,      // fundraiser name + dedication → stored as Comments
+      Param1:      fundraiserLabel,
+      Comment:     commentValue,
     };
-    if (selectedBoy?.donorNumber) {
-      payload["MatrimId"] = selectedBoy.donorNumber;
+    if (numericId) {
+      payload["MatrimId"] = numericId;
     }
 
     iframeRef.current?.contentWindow?.postMessage(
@@ -487,16 +503,17 @@ export function NedarimPaymentModal({
             <iframe
               ref={iframeRef}
               src={(() => {
-                // Confirmed from live API: Param1/Param2 are NEVER returned by
-                // GetHistoryJson. The only field Nedarim reliably populates is
-                // Comments. Pass nedarimName as Comments so the cron's
-                // Comments.includes(nedarimName) match catches these payments.
                 const base = "https://www.matara.pro/nedarimplus/iframe/";
                 if (!selectedBoy) return base;
-                const p = new URLSearchParams();
-                const label = selectedBoy.nedarimName?.trim() || selectedBoy.name;
-                p.set("Comments", label);
-                p.set("Param1",   label);  // kept for forward-compat with any Nedarim config change
+                const p    = new URLSearchParams();
+                const nid  = selectedBoy.donorNumber ?? selectedBoy.matrimId ?? "";
+                const tag  = nid ? `[#${nid}] ` : "";
+                const name = selectedBoy.nedarimName?.trim() || selectedBoy.name;
+                // Pre-fill Comments with "[#ID] nedarimName" so the cron's
+                // Step A numeric tag match works even for payments made directly
+                // through the iframe (without going through handlePay).
+                p.set("Comments", tag + name);
+                p.set("Param1",   name);   // kept for forward-compat
                 return `${base}?${p.toString()}`;
               })()}
               title="נדרים פלוס — הזנת כרטיס אשראי מאובטחת"

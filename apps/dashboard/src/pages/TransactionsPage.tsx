@@ -3,10 +3,12 @@ import {
   addDoc,
   collection,
   doc,
+  increment,
   onSnapshot,
   orderBy,
   query,
   serverTimestamp,
+  setDoc,
   Timestamp,
   updateDoc,
 } from "firebase/firestore";
@@ -38,7 +40,8 @@ interface BoyDoc {
   folderId: string;
   totalRaised: number;
   nedarimName?: string;
-  donorNumber?: string;   // same as MatrimId in the Nedarim API
+  donorNumber?: string;   // numeric MatrimId — used as the [#ID] tag
+  matrimId?: string;      // alternative field name for the same numeric ID
 }
 
 interface FolderDoc {
@@ -464,18 +467,54 @@ function ManualNedarimUpdate({ boys, onSuccess }: ManualNedarimUpdateProps) {
       return;
     }
 
+    // Resolve the numeric ID from either donorNumber or matrimId
+    const numericId = boy.donorNumber ?? boy.matrimId ?? undefined;
+    const signedAmount = parsedAmount * direction;
+
     setSubmitting(true);
     try {
+      // ── 1. Push to Nedarim API ───────────────────────────────────────────
       const result = await pushFn({
-        nedarimName: boy.nedarimName,   // sent as MatrimId (name-based, safer than numeric)
-        amount:      parsedAmount * direction,
+        nedarimName: boy.nedarimName,
+        donorNumber: numericId,           // embedded as [#ID] tag in Comments
+        amount:      signedAmount,
       });
       const data = result.data as Record<string, unknown>;
-      // Nedarim returns Status:"Success" on success
       if (data?.Status === "Error" || data?.Status === "error") {
         throw new Error(String(data?.Description ?? data?.Message ?? "שגיאה מנדרים"));
       }
-      const label = direction === 1 ? "זיכוי" : "חיוב";
+
+      // ── 2. Write transaction to Firestore immediately ────────────────────
+      // Use Nedarim's returned TransactionId as doc ID when available so the
+      // cron's later merge lands on the same document (no duplicates).
+      // The cron's pre-fetch will find this doc and skip the totalRaised increment.
+      const txDocId = data?.TransactionId
+        ? String(data.TransactionId)
+        : `manual_${Date.now()}`;
+
+      await setDoc(doc(clientDb, "transactions", txDocId), {
+        type:          "credit",
+        paymentMethod: "credit",
+        source:        "nedarim",
+        amount:        signedAmount,
+        targetId:      boy.id,
+        targetType:    "boy",
+        targetName:    boy.name,
+        boyId:         boy.id,
+        boyName:       boy.name,
+        dedication:    "",
+        donorNumber:   numericId ?? "",
+        date:          serverTimestamp(),
+        status:        "completed",
+        splitDetails:  [],
+      }, { merge: true });
+
+      // ── 3. Increment boy's totalRaised for instant showcase update ────────
+      await updateDoc(doc(clientDb, "boys", boy.id), {
+        totalRaised: increment(signedAmount),
+      });
+
+      const label = direction === 1 ? "זיכוי" : "הפחתה";
       onSuccess(`${label} של ₪${parsedAmount.toLocaleString("he-IL")} עבור ${boy.name} בוצע בהצלחה`);
       setAmount("");
       setSelectedBoyId("");
@@ -681,6 +720,7 @@ export function TransactionsPage() {
           name:        b.name,
           nedarimName: b.nedarimName,
           donorNumber: b.donorNumber,
+          matrimId:    b.matrimId,
         }))}
         onSuccess={(amount, boyName) =>
           showSuccess(
