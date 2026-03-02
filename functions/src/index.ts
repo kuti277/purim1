@@ -184,15 +184,15 @@ export const syncNedarimTransactions = onSchedule("every 5 minutes", async (_eve
 });
 
 // ─── Nedarim Plus: Push Offline Donation ─────────────────────────────────────
-// Callable from the Dashboard frontend — proxies to the Nedarim MatchingOffline
-// endpoint so that credentials never leave the server and CORS is avoided.
+// Callable from the Dashboard frontend — proxies to the Nedarim SaveAchnasot
+// endpoint to register external cash income in the campaign totals.
+// Credentials never leave the server; CORS is avoided.
 
 export const pushOfflineDonationToNedarim = onCall(async (request) => {
-    const { nedarimName, donorName, dedication, donorNumber, amount } = request.data as {
-        nedarimName:  string;   // boy's nedarimName — used as MatrimId and in Comments
-        donorName?:   string;   // actual donor name; defaults to "Offline Donation"
+    const { nedarimName, dedication, donorNumber, amount } = request.data as {
+        nedarimName:  string;   // boy's nedarimName — embedded in Comments for cron match
         dedication?:  string;   // optional dedication appended to Comments
-        donorNumber?: string;   // numeric MatrimId — embedded as [#ID] tag for deterministic match
+        donorNumber?: string;   // numeric MatrimId — embedded as [#ID] tag for cron Step A
         amount:       number;
     };
 
@@ -211,20 +211,30 @@ export const pushOfflineDonationToNedarim = onCall(async (request) => {
     }
 
     // Comments format: "[#<donorNumber>] <nedarimName> <dedication>"
-    //   • [#ID] tag → cron Step A: regex numeric match (100% accurate)
-    //   • nedarimName included → cron Step B: fuzzy word-count match as fallback
-    //   • dedication → stored in Nedarim's own records for audit trail
+    //   • [#ID] tag  → cron Step A: regex numeric match (100% accurate)
+    //   • nedarimName → cron Step B: fuzzy word-count match as fallback
+    //   • dedication  → stored in Nedarim's own records for audit trail
     const tagPart  = donorNumber ? `[#${donorNumber}]` : "";
     const comments = [tagPart, nedarimName, dedication?.trim()].filter(Boolean).join(" ");
 
+    // Date formatted as DD/MM/YYYY (required by SaveAchnasot).
+    // Explicit padding is safer than toLocaleDateString() whose output varies by Node locale.
+    const now   = new Date();
+    const dd    = String(now.getDate()).padStart(2, "0");
+    const mm    = String(now.getMonth() + 1).padStart(2, "0");
+    const yyyy  = String(now.getFullYear());
+    const dateStr = `${dd}/${mm}/${yyyy}`;
+
     const params = new URLSearchParams({
-        Action:      "MatchingOffline",
+        Action:      "SaveAchnasot",
         MosadNumber: mosadId,
         ApiPassword: apiPassword,
-        MatrimId:    nedarimName,
-        ClientName:  donorName?.trim() || "Offline Donation",
-        Comments:    comments,
+        Type:        "1",           // 1 = Cash / מזומן
+        Zeout:       "000000000",   // required dummy ID — we don't collect donor IDs
         Amount:      String(amount),
+        Date:        dateStr,
+        Currency:    "1",           // 1 = ILS / ₪
+        Comments:    comments,      // [#ID] nedarimName dedication — cron matches on this
     });
 
     const url = `https://matara.pro/nedarimplus/Reports/Manage3.aspx?${params.toString()}`;
