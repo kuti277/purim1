@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   collection,
+  doc,
   limit,
   onSnapshot,
   orderBy,
@@ -154,6 +155,17 @@ function useBinders(): BinderSummary[] {
     );
   }, []);
   return binders;
+}
+
+function useGlobalGoal(): number {
+  const [goal, setGoal] = useState(0);
+  useEffect(() => {
+    return onSnapshot(
+      doc(clientDb, "settings", "global"),
+      (snap) => setGoal(snap.exists() ? ((snap.data()?.globalGoal as number) ?? 0) : 0),
+    );
+  }, []);
+  return goal;
 }
 
 function isToday(ts: Timestamp | undefined): boolean {
@@ -721,13 +733,20 @@ function TransactionSection({ txs }: { txs: TxRow[] }) {
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export function DashboardHomePage() {
-  const boys    = useBoys();
-  const txs     = useTransactions();
-  const binders = useBinders();
+  const boys       = useBoys();
+  const txs        = useTransactions();
+  const binders    = useBinders();
+  const globalGoal = useGlobalGoal();
 
   // ── Quick stats (computed) ────────────────────────────────────────────────
   // totalRaised: use the direct transaction sum — single source of truth.
   const totalRaised  = useAllTimeCampaignTotal();
+  const totalTarget  = useMemo(() => {
+    if (globalGoal > 0) return globalGoal;
+    return boys.reduce((s, b) => s + b.goal, 0);
+  }, [globalGoal, boys]);
+  const campaignPct  = pct(totalRaised, totalTarget);
+  const campaignZone = getZone(campaignPct);
   const inFieldCount = useMemo(() => boys.filter((b) => b.status === "in_field").length, [boys]);
   const todayCount   = useMemo(() => {
     const today = new Date().toDateString();
@@ -809,6 +828,45 @@ export function DashboardHomePage() {
           variant="teal"
         />
       </div>
+
+      {/* ── Campaign progress banner ── */}
+      {totalTarget > 0 && (
+        <div className="rounded-2xl bg-slate-900/80 border border-slate-700/60 p-5 space-y-3">
+          <div className="flex items-center justify-between gap-4">
+            <div className="flex items-center gap-2">
+              <span className="text-lg leading-none">🎯</span>
+              <span className="text-sm font-bold text-white">יעד הקמפיין</span>
+            </div>
+            <div className="flex items-center gap-4 text-xs tabular-nums">
+              <span className="text-slate-400">
+                נגבה: <span className="font-black text-white">{nis(totalRaised)}</span>
+              </span>
+              <span className="text-slate-600">|</span>
+              <span className="text-slate-400">
+                יעד: <span className="font-bold text-slate-300">{nis(totalTarget)}</span>
+              </span>
+              <span className="text-slate-600">|</span>
+              <span className={`font-black text-base ${campaignZone.text}`}>
+                {campaignPct.toFixed(1)}%
+              </span>
+            </div>
+          </div>
+          {/* Progress bar */}
+          <div className="h-3 w-full rounded-full bg-slate-800 overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all duration-700 ${campaignZone.bar}`}
+              style={{ width: `${campaignPct}%` }}
+            />
+          </div>
+          {/* Sub-line */}
+          <p className="text-[11px] text-slate-600">
+            נותרו{" "}
+            <span className="font-bold text-slate-400">{nis(Math.max(0, totalTarget - totalRaised))}</span>
+            {" "}להשלמת היעד
+            {globalGoal > 0 ? " · יעד מוגדר ידנית בהגדרות" : " · יעד מחושב לפי סכום יעדי הבחורים"}
+          </p>
+        </div>
+      )}
 
       {/* ── Section 1: Chart (Cyan) ── */}
       <ChartSection txs={txs} />
