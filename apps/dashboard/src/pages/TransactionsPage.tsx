@@ -27,7 +27,8 @@ interface TxDoc {
   targetId: string;
   targetType: "folder" | "boy";
   targetName: string;
-  dedication: string;
+  donorName?: string;   // name of the person who actually donated
+  dedication: string;   // may contain routing tag like [#87] — strip before display
   date: Timestamp | null;
   // completed → normal; request_cancel → awaiting backend reversal; cancelled → fully reversed
   status: "completed" | "request_cancel" | "cancelled";
@@ -51,6 +52,11 @@ interface FolderDoc {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+/** Remove routing tags like [#87] that the backend injects into the dedication field. */
+function stripTag(s: string | undefined | null): string {
+  return (s ?? "").replace(/\[#\d+\]\s*/g, "").trim();
+}
 
 function formatCurrency(amount: number): string {
   return new Intl.NumberFormat("he-IL", {
@@ -351,6 +357,7 @@ function TransactionHistoryTable({
               {[
                 "תאריך",
                 "יעד",
+                "תורם",
                 "סכום",
                 "אמצעי תשלום",
                 "הקדשה",
@@ -375,7 +382,7 @@ function TransactionHistoryTable({
                   {formatDate(tx.date)}
                 </td>
 
-                {/* Target */}
+                {/* Target (fundraiser / boy) */}
                 <td className="px-4 py-3 text-sm font-medium text-gray-800">
                   {tx.targetName}
                   {tx.targetType === "folder" && (
@@ -383,6 +390,11 @@ function TransactionHistoryTable({
                       (קלסר)
                     </span>
                   )}
+                </td>
+
+                {/* Donor name */}
+                <td className="px-4 py-3 text-sm text-gray-600">
+                  {tx.donorName || <span className="text-gray-300">—</span>}
                 </td>
 
                 {/* Amount */}
@@ -397,9 +409,9 @@ function TransactionHistoryTable({
                     : "מזומן"}
                 </td>
 
-                {/* Dedication */}
+                {/* Dedication — strip routing tag before display */}
                 <td className="max-w-[10rem] truncate px-4 py-3 text-sm text-gray-500">
-                  {tx.dedication || "—"}
+                  {stripTag(tx.dedication) || <span className="text-gray-300">—</span>}
                 </td>
 
                 {/* Status badge */}

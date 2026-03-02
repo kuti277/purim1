@@ -26,9 +26,10 @@ interface Transaction {
   id: string;
   targetId: string;
   targetName: string;
+  donorName?: string;   // name of the person who donated
   amount: number;
   date: Timestamp;
-  dedication?: string;
+  dedication?: string;  // may contain routing tag [#87] — strip before display
   status: string;
 }
 
@@ -92,6 +93,11 @@ function nis(n: number): string {
     minimumFractionDigits: 0,
     maximumFractionDigits: 0,
   }).format(n);
+}
+
+/** Strip routing tags like [#87] that the backend embeds in the dedication field. */
+function stripTag(s: string | undefined): string {
+  return (s ?? "").replace(/\[#\d+\]\s*/g, "").trim();
 }
 
 function pct(raised: number, goal: number): number {
@@ -704,11 +710,19 @@ function TransactionsPanel({ txs, boys, boyTotals }: { txs: Transaction[]; boys:
         )}
         <span className="relative z-10 mt-1.5 h-2 w-2 shrink-0 rounded-full bg-cyan-400 shadow-sm shadow-cyan-400/50" />
         <div className="relative z-10 min-w-0 flex-1">
+          {/* Fundraiser name (boy being collected for) */}
           <p className="truncate text-sm font-bold text-white">
             {tx.targetName || "תלמיד לא ידוע"}
           </p>
-          {tx.dedication ? (
-            <p className="truncate text-xs text-white/50">{tx.dedication}</p>
+          {/* Donor name — who made the donation */}
+          {tx.donorName ? (
+            <p className="truncate text-xs text-cyan-300/70">
+              תורם: {tx.donorName}
+            </p>
+          ) : null}
+          {/* Dedication — routing tag stripped out */}
+          {stripTag(tx.dedication) ? (
+            <p className="truncate text-xs text-white/50">{stripTag(tx.dedication)}</p>
           ) : null}
           {boy && (
             <>
@@ -933,8 +947,10 @@ function Ticker({
 
         {/* ── Strict JSX conditional: transactions rendered ONLY when flag is ON ── */}
         {showTransactions && txs.slice(0, 5).map((tx, i) => {
-          const base = `💳 ${tx.targetName || "תלמיד"} התרים ${nis(tx.amount)}`;
-          const text = tx.dedication ? `${base} — הקדשה: ${tx.dedication}` : base;
+          const base        = `💳 ${tx.targetName || "תלמיד"} התרים ${nis(tx.amount)}`;
+          const donor       = tx.donorName ? ` · תורם: ${tx.donorName}` : "";
+          const cleanDedic  = stripTag(tx.dedication);
+          const text        = cleanDedic ? `${base}${donor} — הקדשה: ${cleanDedic}` : `${base}${donor}`;
           return <span key={`${prefix}-tx-${i}`}>{text}{SEP}</span>;
         })}
 
