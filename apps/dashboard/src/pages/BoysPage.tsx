@@ -12,11 +12,12 @@ import {
   where,
   writeBatch,
 } from "firebase/firestore";
+import { getFunctions, httpsCallable } from "firebase/functions";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from "recharts";
 import * as XLSX from "xlsx";
-import { clientDb } from "../lib/firebase";
+import { clientApp, clientDb } from "../lib/firebase";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -646,6 +647,9 @@ export function BoysPage() {
   // Analytics modal
   const [analyticsTarget, setAnalyticsTarget] = useState<BoyDoc | null>(null);
 
+  // Nedarim sync
+  const [syncing, setSyncing]   = useState(false);
+
   function showSuccess(msg: string) {
     setSuccessMsg(msg);
     if (successTimer.current) clearTimeout(successTimer.current);
@@ -714,6 +718,46 @@ export function BoysPage() {
     }
   }
 
+  // ── Nedarim sync ────────────────────────────────────────────────────────────
+  async function handleNedarimSync() {
+    setSyncing(true);
+    try {
+      const fns  = getFunctions(clientApp);
+      const call = httpsCallable<Record<string, never>, {
+        ok: boolean;
+        total?: number;
+        updated?: number;
+        created?: number;
+        skipped?: number;
+        rawResponse?: string;
+        msg?: string;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        sample?: any[];
+      }>(fns, "syncNedarimBoys");
+
+      const result = await call({});
+      const d = result.data;
+
+      if (!d.ok) {
+        // API returned unexpected payload — show raw to help diagnose
+        const detail = d.msg ?? "שגיאה לא ידועה";
+        const raw    = d.rawResponse ? `\n\nתשובת נדרים: ${d.rawResponse.slice(0, 200)}` : "";
+        showSuccess(`שגיאה מנדרים: ${detail}${raw}`);
+        return;
+      }
+
+      showSuccess(
+        `סונכרן בהצלחה · ${d.total} מתרימים · עודכנו: ${d.updated} · נוצרו: ${d.created}`
+      );
+    } catch (err) {
+      console.error("[BoysPage] syncNedarimBoys error:", err);
+      const msg = err instanceof Error ? err.message : "שגיאה בסנכרון";
+      showSuccess(`שגיאה: ${msg}`);
+    } finally {
+      setSyncing(false);
+    }
+  }
+
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
     <div className="space-y-6">
@@ -728,6 +772,27 @@ export function BoysPage() {
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          {/* Nedarim Sync */}
+          <button
+            type="button"
+            onClick={() => void handleNedarimSync()}
+            disabled={syncing}
+            title="סנכרן רשימת מתרימים מנדרים פלוס"
+            className="flex items-center gap-1.5 rounded-lg border border-violet-500/40 bg-transparent px-3 py-2.5 text-xs font-semibold text-violet-400 transition-colors hover:bg-violet-500/10 hover:border-violet-400/60 disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            {syncing ? (
+              <svg className="h-3.5 w-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth={4} />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+            ) : (
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
+              </svg>
+            )}
+            {syncing ? "מסנכרן..." : "סנכרן מנדרים"}
+          </button>
+
           {/* Export */}
           <button
             type="button"

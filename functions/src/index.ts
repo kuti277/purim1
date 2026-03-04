@@ -274,3 +274,143 @@ export const pushOfflineDonationToNedarim = onCall(async (request) => {
 // adminBackfill3 used on 2026-03-04 — confirmed cron healthy (oldLastId=67,452,352),
 // 106 transactions in Firestore, 0 new matches, 1,703 unmatched (external recurring).
 // Removed.
+
+// ─── Nedarim Plus: Sync Boys / Fundraisers ────────────────────────────────────
+//
+// Callable from the Dashboard → BoysPage "סנכרן מנדרים" button.
+// Fetches the Mosad's fundraiser list via GetMatrimim, then merges into `boys`:
+//   • Existing boy (matched by donorNumber / matrimId) → updates nedarimName
+//   • Unknown Nedarim ID                               → creates new boy doc
+//
+// Returns raw first-3-entry sample on any API error so the caller can
+// diagnose the correct Action / field names without a backend deploy.
+
+export const syncNedarimBoys = onCall(async (_request) => {
+    const mosadId     = process.env.NEDARIM_MOSAD_ID;
+    const apiPassword = process.env.NEDARIM_API_PASSWORD;
+
+    if (!mosadId || !apiPassword) {
+        throw new HttpsError("internal", "Nedarim API credentials are not configured on the server");
+    }
+
+    // Try GetMatrimim — the fundraiser / collector list endpoint.
+    // Falls back to logging raw if response is unexpected so the user
+    // can identify the correct Action without another backend deploy.
+    const url = `https://matara.pro/nedarimplus/Reports/Manage3.aspx?Action=GetMatrimim&MosadId=${mosadId}&ApiPassword=${apiPassword}`;
+
+    const response = await fetch(url);
+    const text = await response.text();
+
+    logger.info("[syncNedarimBoys] raw response snippet:", text.slice(0, 500));
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let data: any;
+    try {
+        data = JSON.parse(text);
+    } catch {
+        throw new HttpsError(
+            "internal",
+            `Nedarim returned non-JSON for GetMatrimim: ${text.slice(0, 500)}`
+        );
+    }
+
+    // If Nedarim returned an error object or non-array, surface the raw payload
+    // so the user can identify the correct action.
+    if (!Array.isArray(data) || data.length === 0) {
+        return {
+            ok:          false,
+            action:      "GetMatrimim",
+            rawResponse: JSON.stringify(data).slice(0, 1000),
+            msg:         "GetMatrimim did not return a non-empty array. See rawResponse to identify the correct Nedarim action or field names.",
+        };
+    }
+
+    // Log field names of the first entry to help identify correct keys
+    const firstEntry = data[0];
+    logger.info("[syncNedarimBoys] first entry keys:", Object.keys(firstEntry));
+    logger.info("[syncNedarimBoys] first entry:", JSON.stringify(firstEntry));
+
+    // Nedarim field name detection — try several naming variants
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    function extractMatrimId(entry: any): string {
+        return String(
+            entry.MatrimId ?? entry.matrimId ?? entry.Id ?? entry.ZehutId ?? ""
+        ).trim();
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    function extractName(entry: any): string {
+        const full = entry.FullName ?? entry.Name ?? entry.name ?? "";
+        if (full) return String(full).trim();
+        const first = String(entry.FirstName ?? entry.firstName ?? "").trim();
+        const last  = String(entry.LastName  ?? entry.lastName  ?? "").trim();
+        return [first, last].filter(Boolean).join(" ");
+    }
+
+    // ── Fetch existing boys ────────────────────────────────────────────────
+    const db       = admin.firestore();
+    const boysSnap = await db.collection("boys").get();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const existingBoys = boysSnap.docs.map((d) => ({ ref: d.ref, ...d.data() } as any));
+
+    // Index existing boys by their Nedarim numeric ID
+    // (donorNumber takes priority, matrimId as fallback — mirrors cron matching logic)
+    const byNedarimId = new Map<string, typeof existingBoys[number]>();
+    for (const boy of existingBoys) {
+        const mid = String(boy.donorNumber ?? boy.matrimId ?? "").trim();
+        if (mid) byNedarimId.set(mid, boy);
+    }
+
+    const batch = db.batch();
+    let updated = 0;
+    let created = 0;
+    let skipped = 0;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    for (const entry of data as any[]) {
+        const matrimId = extractMatrimId(entry);
+        const name     = extractName(entry);
+
+        if (!name) { skipped++; continue; }
+
+        const existing = matrimId ? byNedarimId.get(matrimId) : undefined;
+
+        if (existing) {
+            // Update nedarimName to exactly match Nedarim's canonical spelling,
+            // and ensure donorNumber is set for the [#ID] cron match.
+            batch.update(existing.ref, {
+                nedarimName: name,
+                ...(matrimId ? { donorNumber: matrimId } : {}),
+            });
+            updated++;
+        } else {
+            // New fundraiser found in Nedarim — create a stub boy doc.
+            batch.set(db.collection("boys").doc(), {
+                name,
+                nedarimName:  name,
+                donorNumber:  matrimId,
+                shiur:        "",
+                goal:         2000,
+                totalRaised:  0,
+                status:       "not_out",
+                createdAt:    admin.firestore.FieldValue.serverTimestamp(),
+                createdBy:    "syncNedarimBoys",
+            });
+            created++;
+        }
+    }
+
+    await batch.commit();
+
+    return {
+        ok:      true,
+        action:  "GetMatrimim",
+        total:   data.length,
+        updated,
+        created,
+        skipped,
+        // Surface first 3 entries so the UI can display field names for verification
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        sample:  (data as any[]).slice(0, 3),
+    };
+});
