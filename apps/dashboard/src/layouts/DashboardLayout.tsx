@@ -118,6 +118,16 @@ function IconBell({ active }: { active: boolean }) {
   );
 }
 
+function IconNedarim({ active }: { active: boolean }) {
+  return (
+    <svg className={`h-5 w-5 shrink-0 ${active ? "text-white" : "text-slate-500"}`}
+      fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75} aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round"
+        d="M12 16.5V9.75m0 0 3 3m-3-3-3 3M6.75 19.5a4.5 4.5 0 0 1-1.41-8.775 5.25 5.25 0 0 1 10.338-2.32 5.75 5.75 0 0 1 .895 11.095" />
+    </svg>
+  );
+}
+
 function IconSync({ active }: { active: boolean }) {
   return (
     <svg className={`h-5 w-5 shrink-0 ${active ? "text-white" : "text-slate-500"}`}
@@ -291,6 +301,18 @@ export function DashboardLayout() {
                 <>
                   <IconReceipt active={isActive} />
                   <span>תרומות ועסקאות</span>
+                  {isActive && (
+                    <span className="mr-auto inline-flex h-1.5 w-1.5 rounded-full bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.9)]" />
+                  )}
+                </>
+              )}
+            </NavLink>
+
+            <NavLink to="/nedarim" className={navLinkClass}>
+              {({ isActive }) => (
+                <>
+                  <IconNedarim active={isActive} />
+                  <span>תרומות נדרים</span>
                   {isActive && (
                     <span className="mr-auto inline-flex h-1.5 w-1.5 rounded-full bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.9)]" />
                   )}

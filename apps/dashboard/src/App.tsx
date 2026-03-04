@@ -12,6 +12,7 @@ import { TickerPage } from "./pages/TickerPage";
 import { AddressBankPage } from "./pages/AddressBankPage";
 import { SyncCenterPage } from "./pages/SyncCenterPage";
 import { AlertsPage } from "./pages/AlertsPage";
+import { NedarimTransactionsPage } from "./pages/NedarimTransactionsPage";
 import { LoginPage } from "./pages/LoginPage";
 
 /**
@@ -23,6 +24,7 @@ import { LoginPage } from "./pages/LoginPage";
  *      / (index)         →     DashboardHomePage
  *      /field            →     FoldersPage          (field & folders management with SIP dialer)
  *      /transactions     →     TransactionsPage     (manual donations + transaction history)
+ *      /nedarim          →     NedarimTransactionsPage (Nedarim Plus sync log)
  *      /workers          →     BoysPage             (collectors / boys management)
  *      /settings         →     SettingsPage         (control room — TV showcase settings)
  */
@@ -40,6 +42,7 @@ export default function App() {
               <Route index element={<DashboardHomePage />} />
               <Route path="field" element={<FoldersPage />} />
               <Route path="transactions" element={<TransactionsPage />} />
+              <Route path="nedarim" element={<NedarimTransactionsPage />} />
               <Route path="workers" element={<BoysPage />} />
               <Route path="binders" element={<BindersPage />} />
               <Route path="address-bank" element={<AddressBankPage />} />
