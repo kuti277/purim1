@@ -270,3 +270,7 @@ export const pushOfflineDonationToNedarim = onCall(async (request) => {
 
 // adminBackfill2 used on 2026-03-02 — confirmed 104 transactions already in Firestore,
 // 0 new matches, lastId healthy at 67,292,935. Removed.
+
+// adminBackfill3 used on 2026-03-04 — confirmed cron healthy (oldLastId=67,452,352),
+// 106 transactions in Firestore, 0 new matches, 1,703 unmatched (external recurring).
+// Removed.
