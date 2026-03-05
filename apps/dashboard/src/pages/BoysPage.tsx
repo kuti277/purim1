@@ -748,30 +748,34 @@ export function BoysPage() {
       const fns  = getFunctions(clientApp);
       const call = httpsCallable<Record<string, never>, {
         ok: boolean;
-        total?: number;
-        updated?: number;
+        totalTx?: number;
+        uniqueGroupes?: number;
+        alreadyMapped?: number;
         created?: number;
-        skipped?: number;
+        newGroupes?: string[];
         rawResponse?: string;
         msg?: string;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        sample?: any[];
       }>(fns, "syncNedarimBoys");
 
       const result = await call({});
       const d = result.data;
 
       if (!d.ok) {
-        // API returned unexpected payload — show raw to help diagnose
         const detail = d.msg ?? "שגיאה לא ידועה";
-        const raw    = d.rawResponse ? `\n\nתשובת נדרים: ${d.rawResponse.slice(0, 200)}` : "";
-        showSuccess(`שגיאה מנדרים: ${detail}${raw}`);
+        showSuccess(`שגיאה: ${detail}`);
         return;
       }
 
-      showSuccess(
-        `סונכרן בהצלחה · ${d.total} מתרימים · עודכנו: ${d.updated} · נוצרו: ${d.created}`
-      );
+      if (d.created === 0) {
+        showSuccess(
+          `סונכרן · ${d.uniqueGroupes ?? 0} מתרימים בנדרים · הכל כבר ממופה`
+        );
+      } else {
+        showSuccess(
+          `סונכרן בהצלחה · נוצרו ${d.created} מתרימים חדשים · ` +
+          `${d.alreadyMapped ?? 0} כבר קיימים`
+        );
+      }
     } catch (err) {
       console.error("[BoysPage] syncNedarimBoys error:", err);
       const msg = err instanceof Error ? err.message : "שגיאה בסנכרון";

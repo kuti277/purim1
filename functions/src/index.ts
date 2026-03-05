@@ -92,13 +92,14 @@ export const syncNedarimTransactions = onSchedule("every 5 minutes", async (_eve
             if (isNaN(amount)) continue;
 
             const txComments = String(tx.Comments ?? "").trim();
+            const txGroupe   = String(tx.Groupe   ?? "").trim();
             const donorName  = String(tx.ClientName ?? "").trim();
 
-            // ── STEP A — Deterministic numeric tag ────────────────────────────
+            // ── STEP A — Deterministic [#ID] tag (our own offline-push system) ─
             //
-            // Our iframe and offline-push embed a tag like [#87] in Comments.
-            // Extract the numeric ID and look up the boy by donorNumber / matrimId.
-            // This is 100% accurate: no string comparison, no word-order sensitivity.
+            // Our iframe and pushOfflineDonationToNedarim callable embed a tag like
+            // [#87] in Comments, where 87 is the boy's donorNumber / matrimId.
+            // 100% accurate — no string comparison, no word-order sensitivity.
             //
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             let matchedBoy: any = undefined;
@@ -112,15 +113,31 @@ export const syncNedarimTransactions = onSchedule("every 5 minutes", async (_eve
                 });
             }
 
-            // ── STEP B — Fuzzy word-count match (external campaign page) ──────
+            // ── STEP 0 — Groupe field exact match (Nedarim campaign page) ─────
             //
-            // The live Nedarim campaign page does not embed our [#ID] tag.
-            // It writes free text like "ע"י המתרים אברהם ליכט" to Comments.
-            // A strict substring match fails when name order differs
-            // (DB: "ליכט אברהם יהודה" vs Comments: "אברהם ליכט").
+            // The Nedarim campaign page sets tx.Groupe to the fundraiser's name
+            // exactly as it appears in Nedarim — identical to boy.nedarimName.
+            // This is authoritative for externally generated (campaign-page)
+            // transactions and requires no fuzzy parsing.
             //
-            // Rule: split nedarimName into words.
-            //   • 1 word  → must appear anywhere in Comments (case-insensitive).
+            // Transactions without a specific fundraiser carry Groupe = "תרומה כללית"
+            // which we skip here and let fall through to the Comments fallback.
+            if (!matchedBoy && txGroupe && txGroupe !== "תרומה כללית") {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                matchedBoy = allBoys.find((b: any) => {
+                    const nn = String(b.nedarimName ?? "").trim();
+                    return nn !== "" && nn === txGroupe;
+                });
+            }
+
+            // ── STEP B — Fuzzy word-count match in Comments (legacy fallback) ──
+            //
+            // Kept for historical transactions where Groupe = "תרומה כללית" but
+            // the fundraiser name appears in Comments (e.g. older offline pushes or
+            // donors who manually typed the name in the donation form).
+            //
+            // Rule: split boy.nedarimName into words.
+            //   • 1 word  → must appear anywhere in Comments.
             //   • 2+ words → at least 2 individual words must appear (order-free).
             if (!matchedBoy && txComments) {
                 const lowerComments = txComments.toLowerCase();
@@ -133,8 +150,6 @@ export const syncNedarimTransactions = onSchedule("every 5 minutes", async (_eve
                     if (words.length === 1) {
                         return lowerComments.includes(words[0].toLowerCase());
                     }
-                    // 2+ words: require at least 2 to match (prevents false positives
-                    // from single common words appearing in unrelated Comments)
                     const hits = words.filter(
                         (w: string) => lowerComments.includes(w.toLowerCase())
                     ).length;
@@ -164,6 +179,7 @@ export const syncNedarimTransactions = onSchedule("every 5 minutes", async (_eve
                 amount,
                 donorName,
                 dedication:    txComments,
+                groupe:        txGroupe,   // Nedarim's Groupe field (fundraiser name)
                 paymentMethod: "credit",
                 status:        "completed",
                 source:        "nedarim",
@@ -278,12 +294,15 @@ export const pushOfflineDonationToNedarim = onCall(async (request) => {
 // ─── Nedarim Plus: Sync Boys / Fundraisers ────────────────────────────────────
 //
 // Callable from the Dashboard → BoysPage "סנכרן מנדרים" button.
-// Fetches the Mosad's fundraiser list via GetMatrimim, then merges into `boys`:
-//   • Existing boy (matched by donorNumber / matrimId) → updates nedarimName
-//   • Unknown Nedarim ID                               → creates new boy doc
 //
-// Returns raw first-3-entry sample on any API error so the caller can
-// diagnose the correct Action / field names without a backend deploy.
+// The Nedarim API has no dedicated endpoint for fetching fundraiser lists.
+// Instead we extract unique values of the `Groupe` field from GetHistoryJson —
+// Nedarim sets Groupe to the fundraiser's canonical name on every campaign-page
+// transaction. Transactions without a specific fundraiser carry "תרומה כללית".
+//
+// Merge logic:
+//   • Groupe already matches a boy's nedarimName → skip (already mapped)
+//   • Groupe not found in any boy → create a stub boy doc
 
 export const syncNedarimBoys = onCall(async (_request) => {
     const mosadId     = process.env.NEDARIM_MOSAD_ID;
@@ -293,58 +312,45 @@ export const syncNedarimBoys = onCall(async (_request) => {
         throw new HttpsError("internal", "Nedarim API credentials are not configured on the server");
     }
 
-    // Try GetMatrimim — the fundraiser / collector list endpoint.
-    // Falls back to logging raw if response is unexpected so the user
-    // can identify the correct Action without another backend deploy.
-    const url = `https://matara.pro/nedarimplus/Reports/Manage3.aspx?Action=GetMatrimim&MosadId=${mosadId}&ApiPassword=${apiPassword}`;
+    // Pull the full transaction history from the start of the campaign.
+    // We need a wide window to catch all Groupe values, not just the last 5 min.
+    const url = `https://matara.pro/nedarimplus/Reports/Manage3.aspx?Action=GetHistoryJson&MosadId=${mosadId}&ApiPassword=${apiPassword}&LastId=40000000`;
 
     const response = await fetch(url);
     const text = await response.text();
-
-    logger.info("[syncNedarimBoys] raw response snippet:", text.slice(0, 500));
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let data: any;
     try {
         data = JSON.parse(text);
     } catch {
-        throw new HttpsError(
-            "internal",
-            `Nedarim returned non-JSON for GetMatrimim: ${text.slice(0, 500)}`
-        );
+        throw new HttpsError("internal", `Nedarim returned non-JSON: ${text.slice(0, 300)}`);
     }
 
-    // If Nedarim returned an error object or non-array, surface the raw payload
-    // so the user can identify the correct action.
     if (!Array.isArray(data) || data.length === 0) {
+        return { ok: false, msg: "GetHistoryJson returned no transactions", raw: text.slice(0, 300) };
+    }
+
+    // ── Extract unique Groupe values ───────────────────────────────────────
+    const groupeSet = new Set<string>();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    for (const tx of data as any[]) {
+        const g = String(tx.Groupe ?? "").trim();
+        if (g && g !== "תרומה כללית") groupeSet.add(g);
+    }
+
+    const uniqueGroupes = Array.from(groupeSet).sort();
+    logger.info(`[syncNedarimBoys] ${data.length} txs → ${uniqueGroupes.length} unique Groupe values`);
+    logger.info("[syncNedarimBoys] Groupes:", uniqueGroupes);
+
+    if (uniqueGroupes.length === 0) {
         return {
-            ok:          false,
-            action:      "GetMatrimim",
-            rawResponse: JSON.stringify(data).slice(0, 1000),
-            msg:         "GetMatrimim did not return a non-empty array. See rawResponse to identify the correct Nedarim action or field names.",
+            ok:      true,
+            totalTx: data.length,
+            msg:     "No fundraiser-specific Groupe values found — all transactions are תרומה כללית",
+            created: 0,
+            alreadyMapped: 0,
         };
-    }
-
-    // Log field names of the first entry to help identify correct keys
-    const firstEntry = data[0];
-    logger.info("[syncNedarimBoys] first entry keys:", Object.keys(firstEntry));
-    logger.info("[syncNedarimBoys] first entry:", JSON.stringify(firstEntry));
-
-    // Nedarim field name detection — try several naming variants
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    function extractMatrimId(entry: any): string {
-        return String(
-            entry.MatrimId ?? entry.matrimId ?? entry.Id ?? entry.ZehutId ?? ""
-        ).trim();
-    }
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    function extractName(entry: any): string {
-        const full = entry.FullName ?? entry.Name ?? entry.name ?? "";
-        if (full) return String(full).trim();
-        const first = String(entry.FirstName ?? entry.firstName ?? "").trim();
-        const last  = String(entry.LastName  ?? entry.lastName  ?? "").trim();
-        return [first, last].filter(Boolean).join(" ");
     }
 
     // ── Fetch existing boys ────────────────────────────────────────────────
@@ -353,64 +359,48 @@ export const syncNedarimBoys = onCall(async (_request) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const existingBoys = boysSnap.docs.map((d) => ({ ref: d.ref, ...d.data() } as any));
 
-    // Index existing boys by their Nedarim numeric ID
-    // (donorNumber takes priority, matrimId as fallback — mirrors cron matching logic)
-    const byNedarimId = new Map<string, typeof existingBoys[number]>();
-    for (const boy of existingBoys) {
-        const mid = String(boy.donorNumber ?? boy.matrimId ?? "").trim();
-        if (mid) byNedarimId.set(mid, boy);
-    }
+    // Index by nedarimName for exact lookup
+    const mappedNames = new Set<string>(
+        existingBoys
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            .map((b: any) => String(b.nedarimName ?? "").trim())
+            .filter(Boolean)
+    );
 
     const batch = db.batch();
-    let updated = 0;
-    let created = 0;
-    let skipped = 0;
+    let created       = 0;
+    let alreadyMapped = 0;
+    const newGroupes: string[] = [];
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    for (const entry of data as any[]) {
-        const matrimId = extractMatrimId(entry);
-        const name     = extractName(entry);
-
-        if (!name) { skipped++; continue; }
-
-        const existing = matrimId ? byNedarimId.get(matrimId) : undefined;
-
-        if (existing) {
-            // Update nedarimName to exactly match Nedarim's canonical spelling,
-            // and ensure donorNumber is set for the [#ID] cron match.
-            batch.update(existing.ref, {
-                nedarimName: name,
-                ...(matrimId ? { donorNumber: matrimId } : {}),
-            });
-            updated++;
-        } else {
-            // New fundraiser found in Nedarim — create a stub boy doc.
-            batch.set(db.collection("boys").doc(), {
-                name,
-                nedarimName:  name,
-                donorNumber:  matrimId,
-                shiur:        "",
-                goal:         2000,
-                totalRaised:  0,
-                status:       "not_out",
-                createdAt:    admin.firestore.FieldValue.serverTimestamp(),
-                createdBy:    "syncNedarimBoys",
-            });
-            created++;
+    for (const groupe of uniqueGroupes) {
+        if (mappedNames.has(groupe)) {
+            alreadyMapped++;
+            continue;
         }
+        // Create a stub boy — user can fill in shiur/goal/status later
+        batch.set(db.collection("boys").doc(), {
+            name:        groupe,
+            nedarimName: groupe,
+            donorNumber: "",
+            shiur:       "",
+            goal:        2000,
+            totalRaised: 0,
+            status:      "not_out",
+            createdAt:   admin.firestore.FieldValue.serverTimestamp(),
+            createdBy:   "syncNedarimBoys",
+        });
+        created++;
+        newGroupes.push(groupe);
     }
 
-    await batch.commit();
+    if (created > 0) await batch.commit();
 
     return {
-        ok:      true,
-        action:  "GetMatrimim",
-        total:   data.length,
-        updated,
+        ok:            true,
+        totalTx:       data.length,
+        uniqueGroupes: uniqueGroupes.length,
+        alreadyMapped,
         created,
-        skipped,
-        // Surface first 3 entries so the UI can display field names for verification
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        sample:  (data as any[]).slice(0, 3),
+        newGroupes,
     };
 });
