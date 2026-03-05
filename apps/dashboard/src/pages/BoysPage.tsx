@@ -324,30 +324,53 @@ function BoyModal({ mode, boy, onClose, onSaved }: ModalProps) {
               </select>
             </div>
 
-            {/* Nedarim Name */}
-            <div className="flex flex-col gap-1">
-              <label htmlFor="boy-nedarim" className={labelCls}>שם נדרים</label>
-              <input
-                id="boy-nedarim"
-                type="text"
-                placeholder="שם כפי שמופיע בנדרים"
-                value={form.nedarimName}
-                onChange={field("nedarimName")}
-                className={fieldCls}
-              />
-            </div>
+            {/* ── Nedarim Plus Integration ─────────────────────────────── */}
+            <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-4 py-3 space-y-4">
+              <div className="flex items-center gap-2">
+                <svg className="h-3.5 w-3.5 shrink-0 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0 3.181 3.183a8.25 8.25 0 0 0 13.803-3.7M4.031 9.865a8.25 8.25 0 0 1 13.803-3.7l3.181 3.182m0-4.991v4.99" />
+                </svg>
+                <span className="text-xs font-semibold text-amber-400 tracking-wide">קישור נדרים פלוס</span>
+              </div>
 
-            {/* Donor Number */}
-            <div className="flex flex-col gap-1">
-              <label htmlFor="boy-donor-num" className={labelCls}>מספר מתרים</label>
-              <input
-                id="boy-donor-num"
-                type="text"
-                placeholder="מספר מתרים במערכת"
-                value={form.donorNumber}
-                onChange={field("donorNumber")}
-                className={fieldCls}
-              />
+              {/* Nedarim Name */}
+              <div className="flex flex-col gap-1">
+                <label htmlFor="boy-nedarim" className={labelCls}>
+                  שם נדרים
+                  <span className="mr-1.5 rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-amber-400">חשוב לשיוך</span>
+                </label>
+                <input
+                  id="boy-nedarim"
+                  type="text"
+                  placeholder="השם המדויק כפי שמופיע בנדרים"
+                  value={form.nedarimName}
+                  onChange={field("nedarimName")}
+                  className={fieldCls}
+                />
+                <p className="text-[11px] text-slate-500 leading-relaxed">
+                  שם נדרים — השם המדויק כפי שמופיע בקופת נדרים. משמש לשיוך אוטומטי של עסקאות.
+                </p>
+              </div>
+
+              {/* Donor Number / MatrimId */}
+              <div className="flex flex-col gap-1">
+                <label htmlFor="boy-donor-num" className={labelCls}>
+                  מספר מתרים (MatrimId)
+                  <span className="mr-1.5 rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-amber-400">מומלץ</span>
+                </label>
+                <input
+                  id="boy-donor-num"
+                  type="text"
+                  dir="ltr"
+                  placeholder="לדוגמה: 12345"
+                  value={form.donorNumber}
+                  onChange={field("donorNumber")}
+                  className={fieldCls}
+                />
+                <p className="text-[11px] text-slate-500 leading-relaxed">
+                  מספר מתרים — מזהה המתרים הרשמי מנדרים (MatrimId). כשקיים, מבטיח שיוך מהיר ומדויק ב-100% ללא תלות בשם.
+                </p>
+              </div>
             </div>
 
             {/* totalRaised — read-only, edit mode only */}
@@ -875,7 +898,15 @@ export function BoysPage() {
             <table className="min-w-full divide-y divide-slate-800/50">
               <thead className="bg-slate-800/50">
                 <tr>
-                  {["שם", "שיעור", "יעד גיוס", 'סה"כ נתרם', "סטטוס", "פעולות"].map((h) => (
+                  {[
+                    "שם תצוגה במערכת",
+                    "שם נדרים",
+                    "מספר מתרים",
+                    "שיעור / קבוצה",
+                    "יעד גיוס",
+                    'סה"כ נתרם',
+                    "פעולות",
+                  ].map((h) => (
                     <th
                       key={h}
                       className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-slate-500"
@@ -898,22 +929,52 @@ export function BoysPage() {
                           : "bg-transparent hover:bg-slate-800/30"
                       }`}
                     >
-                      {/* Name */}
-                      <td className="px-4 py-3 text-sm font-semibold text-white">
-                        {boy.name}
+                      {/* שם תצוגה במערכת — local name + status badge inline */}
+                      <td className="px-4 py-3">
+                        <div className="flex flex-col gap-1">
+                          <span className="text-sm font-semibold text-white leading-tight">
+                            {boy.name}
+                          </span>
+                          <StatusBadge status={boy.status} />
+                        </div>
                       </td>
 
-                      {/* Shiur */}
+                      {/* שם נדרים — warning icon when missing */}
+                      <td className="px-4 py-3">
+                        {boy.nedarimName ? (
+                          <span className="text-sm text-slate-200">{boy.nedarimName}</span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-xs text-amber-400">
+                            <svg className="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
+                            </svg>
+                            לא הוגדר
+                          </span>
+                        )}
+                      </td>
+
+                      {/* מספר מתרים — monospace ID badge */}
+                      <td className="px-4 py-3">
+                        {boy.donorNumber ? (
+                          <span className="inline-flex items-center rounded-md border border-cyan-500/30 bg-cyan-500/10 px-2 py-0.5 font-mono text-xs font-medium text-cyan-400">
+                            #{boy.donorNumber}
+                          </span>
+                        ) : (
+                          <span className="text-xs text-slate-600">—</span>
+                        )}
+                      </td>
+
+                      {/* שיעור / קבוצה */}
                       <td className="px-4 py-3 text-sm text-slate-300">
-                        {boy.shiur}
+                        {boy.shiur || <span className="text-slate-600">—</span>}
                       </td>
 
-                      {/* Goal */}
+                      {/* יעד גיוס */}
                       <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-300">
                         {formatCurrency(boy.goal)}
                       </td>
 
-                      {/* Total raised — visually distinguished as read-only data */}
+                      {/* סה"כ נתרם */}
                       <td className="whitespace-nowrap px-4 py-3">
                         <span className="text-sm font-medium text-white">
                           {formatCurrency(boy.totalRaised)}
@@ -921,11 +982,6 @@ export function BoysPage() {
                         <span className="mr-1.5 text-[11px] text-slate-500">
                           ({progressPct(boy.totalRaised, boy.goal)}%)
                         </span>
-                      </td>
-
-                      {/* Status */}
-                      <td className="px-4 py-3">
-                        <StatusBadge status={boy.status} />
                       </td>
 
                       {/* Actions */}
